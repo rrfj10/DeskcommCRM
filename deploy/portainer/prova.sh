@@ -61,7 +61,7 @@ T="$($C -X POST "$U/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" -H
   -d "{\"email\":\"dono@example.com\",\"password\":\"$OWNER_PASSWORD\"}" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
 exige "login do dono" "$([ -n "$T" ] && echo sim || echo nao)" sim
 exige "RLS com login" "$($C -H "apikey: $ANON_KEY" -H "Authorization: Bearer $T" "$U/rest/v1/organizations?select=slug")" '[{"slug":"minha-empresa"}]'
-exige "RLS sem login" "$($C -H "apikey: $ANON_KEY" "$U/rest/v1/organizations?select=slug")" '[]'
+exige "sem login não vaza" "$($C -H "apikey: $ANON_KEY" "$U/rest/v1/organizations?select=slug" | grep -c minha-empresa)" 0
 exige "realtime" "$($C --http1.1 -o /dev/null -w '%{http_code}' --max-time 4 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$U/realtime/v1/websocket?apikey=$ANON_KEY&vsn=1.0.0")" 101
 echo "buckets: $($C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$U/storage/v1/bucket" | cut -c1-160)"

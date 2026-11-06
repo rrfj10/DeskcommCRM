@@ -10,7 +10,7 @@ name: Imagens da 3f-custom
 
 on:
   push:
-    branches: ["3f-custom", "feature/stack-portainer"]
+    branches: ["3f-custom"]
 
 # Sem cancelar: uma atualização cortada ao meio deixa serviços em versões diferentes.
 concurrency:

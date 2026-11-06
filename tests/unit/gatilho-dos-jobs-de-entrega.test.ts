@@ -79,8 +79,7 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
   "imagens-3f-custom.yml::implantar": {
     condicao: "github.ref_name == '3f-custom'",
     efeito:
-      "Chama o setup da VPS do fork. Desligado, as imagens saem e nada muda na VPS. " +
-      "O pulo é deliberado só na branch de trabalho da própria stack.",
+      "Chama o setup da VPS do fork. Desligado, as imagens saem e nada muda na VPS.",
   },
   "release.yml::abrir-pr-de-release": {
     condicao: "github.event_name == 'workflow_dispatch'",
