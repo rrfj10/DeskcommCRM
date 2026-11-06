@@ -290,7 +290,6 @@ services:
       labels:
         traefik.enable: "true"
         traefik.swarm.network: ${TRAEFIK_NETWORK}
-        traefik.docker.network: ${TRAEFIK_NETWORK}
         traefik.http.routers.deskcomm-supabase.rule: Host(`${DOMAIN}`) && (PathPrefix(`/auth/v1`) || PathPrefix(`/rest/v1`) || PathPrefix(`/realtime/v1`) || PathPrefix(`/storage/v1`))
         traefik.http.routers.deskcomm-supabase.entrypoints: ${TRAEFIK_ENTRYPOINT}
         traefik.http.routers.deskcomm-supabase.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
@@ -324,7 +323,6 @@ services:
       labels:
         traefik.enable: "true"
         traefik.swarm.network: ${TRAEFIK_NETWORK}
-        traefik.docker.network: ${TRAEFIK_NETWORK}
         traefik.http.routers.deskcomm.rule: Host(`${DOMAIN}`)
         traefik.http.routers.deskcomm.entrypoints: ${TRAEFIK_ENTRYPOINT}
         traefik.http.routers.deskcomm.tls.certresolver: ${TRAEFIK_CERTRESOLVER}

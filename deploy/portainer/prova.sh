@@ -25,7 +25,8 @@ docker service create -q --name traefik_traefik --network dcnet \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --publish mode=host,target=80,published=80 --publish mode=host,target=443,published=443 \
   traefik:v3.7.16 --log.level=DEBUG --providers.swarm=true --providers.swarm.exposedbydefault=false \
-  --providers.swarm.network=dcnet --entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
+  --providers.swarm.network=dcnet --providers.docker.endpoint=unix:///var/run/docker.sock \
+  --providers.docker.exposedbydefault=false --providers.docker.network=dcnet --entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
   --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true \
   --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web \
   --certificatesresolvers.letsencryptresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory \
