@@ -1,0 +1,124 @@
+name: Imagens da 3f-custom
+
+# Publica as imagens do fork a cada push na 3f-custom e atualiza a VPS pelos
+# webhooks de serviço do Portainer. Fica separado do publish-image.yml, que só
+# reage à main, para a sincronização com o projeto original não dar conflito.
+#
+# Só linux/amd64: é a arquitetura da VPS, e o build leva metade do tempo.
+#
+# A atualização automática para quando supabase/baseline.sql mudou desde a última
+# implantação, porque app novo em banco velho quebra. Nesse caso, rode
+# aplicar-schema.sh na VPS e depois este workflow à mão (Run workflow).
+#
+# Segredos do repositório: PORTAINER_WEBHOOK_APP, PORTAINER_WEBHOOK_WORKER e
+# PORTAINER_WEBHOOK_SCHEDULER. Sem eles, publica as imagens e não atualiza nada.
+
+on:
+  push:
+    branches: ["3f-custom"]
+  workflow_dispatch:
+    inputs:
+      implantar:
+        description: Atualizar a VPS depois de publicar (o schema já foi aplicado)
+        type: boolean
+        default: true
+
+# Sem cancelar: uma implantação cortada ao meio deixa serviços em versões diferentes.
+concurrency:
+  group: imagens-3f-custom
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  MARCA_IMPLANTADO: implantado-3f-custom
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: deskcommcrm
+            dockerfile: Dockerfile
+          - name: deskcomm-worker
+            dockerfile: Dockerfile.worker
+          - name: deskcomm-scheduler
+            dockerfile: Dockerfile.scheduler
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolver versão
+        id: ver
+        run: echo "curta=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build e push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:3f-custom
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ steps.ver.outputs.curta }}
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.curta }}
+          cache-from: type=gha,scope=3f-custom-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=3f-custom-${{ matrix.name }}
+
+  implantar:
+    needs: publicar
+    if: github.event_name == 'push' || inputs.implantar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Compara com a última implantação, e não com o push anterior: um push que
+      # ficou sem implantar segue bloqueando os seguintes até o schema ser aplicado.
+      # Sem a marca, o git falha e conta como mudança, o que vale para a primeira vez.
+      - name: O schema mudou desde a última implantação?
+        id: banco
+        run: |
+          mudou=nao
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            git fetch --force --tags origin
+            git diff --quiet "refs/tags/$MARCA_IMPLANTADO" "$GITHUB_SHA" -- supabase/baseline.sql || mudou=sim
+          fi
+          echo "mudou=$mudou" >> "$GITHUB_OUTPUT"
+          if [ "$mudou" = "sim" ]; then
+            echo "::warning::Schema mudou: imagens publicadas, VPS não atualizada. Rode aplicar-schema.sh e depois este workflow à mão."
+          fi
+
+      - name: Atualizar os serviços
+        if: steps.banco.outputs.mudou == 'nao'
+        env:
+          APP: ${{ secrets.PORTAINER_WEBHOOK_APP }}
+          WORKER: ${{ secrets.PORTAINER_WEBHOOK_WORKER }}
+          SCHEDULER: ${{ secrets.PORTAINER_WEBHOOK_SCHEDULER }}
+        run: |
+          if [ -z "$APP" ] || [ -z "$WORKER" ] || [ -z "$SCHEDULER" ]; then
+            echo "::warning::Faltam os segredos PORTAINER_WEBHOOK_*: VPS não atualizada."
+            exit 0
+          fi
+          for url in "$WORKER" "$SCHEDULER" "$APP"; do
+            curl -fsS -o /dev/null -X POST --max-time 120 "$url"
+          done
+          git tag -f "$MARCA_IMPLANTADO" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$MARCA_IMPLANTADO"

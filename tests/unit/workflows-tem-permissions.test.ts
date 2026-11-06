@@ -52,6 +52,10 @@ const DIR = join(process.cwd(), ".github/workflows");
  * acrescente, e acrescentar sem razão é visível em code review.
  */
 const ESCRITA_JUSTIFICADA: Record<string, string> = {
+  "imagens-3f-custom.yml::packages: write":
+    "publica no GHCR do fork as imagens que a VPS do fork instala",
+  "imagens-3f-custom.yml::contents: write":
+    "move a tag implantado-3f-custom, que marca o que já foi implantado na VPS do fork",
   "publish-image.yml::packages: write":
     "publica a imagem do app no GHCR — é o artefato que o self-hoster instala",
   "vigia-de-colisao.yml::pull-requests: write":

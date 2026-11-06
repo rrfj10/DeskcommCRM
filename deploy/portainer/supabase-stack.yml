@@ -1,0 +1,265 @@
+# Stack "supabase" para Portainer (Docker Swarm).
+# Imagens oficiais, nas versões de self-hosted/v0.8.1 (a ref fixada pelo kit em
+# hostgator-setup-kit/_common.sh). Studio, meta, functions, imgproxy e supavisor
+# ficam de fora: o CRM não usa nenhum deles.
+# Variáveis: gere com preparar-vps.sh e carregue /opt/deskcomm/stacks.env no Portainer.
+# Banco e gateway não publicam porta: só o Traefik alcança o gateway.
+
+x-deploy: &deploy
+  mode: replicated
+  replicas: 1
+  placement:
+    constraints: [node.role == manager]
+  restart_policy:
+    condition: any
+    delay: 5s
+
+services:
+  db:
+    image: supabase/postgres:17.6.1.136
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: "5432"
+      POSTGRES_PORT: "5432"
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: "3600"
+    volumes:
+      - ${DESKCOMM_DIR}/supabase/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql
+      - ${DESKCOMM_DIR}/supabase/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql
+      - ${DESKCOMM_DIR}/supabase/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql
+      - ${DESKCOMM_DIR}/supabase/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql
+      - ${DESKCOMM_DIR}/supabase/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql
+      - ${DESKCOMM_DIR}/supabase/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql
+      - ${DESKCOMM_DIR}/supabase/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql
+      - ${DESKCOMM_DIR}/supabase/db/data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      deskcomm_net:
+        aliases: [supabase-db]
+    stop_grace_period: 60s
+    deploy:
+      <<: *deploy
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 2048M
+
+  auth:
+    image: supabase/gotrue:v2.196.0
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: https://${DOMAIN}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      GOTRUE_DB_MAX_IDLE_POOL_SIZE: "10"
+      GOTRUE_DB_CONN_MAX_IDLE_TIME: 5m
+      GOTRUE_SITE_URL: https://${DOMAIN}
+      GOTRUE_URI_ALLOW_LIST: https://${DOMAIN}/auth/confirm,https://${DOMAIN}/**
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: https://${DOMAIN}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM_EMAIL:-admin@example.com}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-supabase-mail}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-2500}
+      GOTRUE_SMTP_USER: ${SMTP_USERNAME:-fake_mail_user}
+      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-fake_mail_password}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_FROM_NAME:-DeskcommCRM}
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://app:3000/email-templates/confirmation
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://app:3000/email-templates/recovery
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_SMS_AUTOCONFIRM: "false"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [deskcomm_net]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+
+  rest:
+    image: postgrest/postgrest:v14.17
+    command: ["postgrest"]
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_MAX_ROWS: "1000"
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: "3600"
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [deskcomm_net]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+
+  realtime:
+    image: supabase/realtime:v2.134.10
+    environment:
+      PORT: "4000"
+      DB_HOST: supabase-db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      deskcomm_net:
+        # O gateway chama este nome, e o Realtime tira o tenant dele.
+        aliases: [realtime-dev.supabase-realtime]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 512M
+
+  storage:
+    image: supabase/storage-api:v1.74.0
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      STORAGE_PUBLIC_URL: https://${DOMAIN}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      GLOBAL_S3_BUCKET: stub
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+    volumes:
+      - ${DESKCOMM_DIR}/supabase/storage:/var/lib/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [deskcomm_net]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 512M
+
+  api-gw:
+    image: envoyproxy/envoy:v1.39.1
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEY: ""
+      SUPABASE_SECRET_KEY: ""
+      ANON_KEY_ASYMMETRIC: ""
+      SERVICE_ROLE_KEY_ASYMMETRIC: ""
+      SUPABASE_PUBLIC_URL: https://${DOMAIN}
+      DASHBOARD_USERNAME: supabase
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    volumes:
+      - ${DESKCOMM_DIR}/supabase/api/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ${DESKCOMM_DIR}/supabase/api/cds.yaml:/etc/envoy/cds.yaml:ro
+      - ${DESKCOMM_DIR}/supabase/api/lds.template.yaml:/etc/envoy/lds.template.yaml:ro
+      - ${DESKCOMM_DIR}/supabase/api/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      deskcomm_net:
+        aliases: [supabase-gw]
+      proxy: {}
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: ${TRAEFIK_NETWORK}
+        traefik.docker.network: ${TRAEFIK_NETWORK}
+        traefik.http.routers.deskcomm-supabase.rule: Host(`${DOMAIN}`) && (PathPrefix(`/auth/v1`) || PathPrefix(`/rest/v1`) || PathPrefix(`/realtime/v1`) || PathPrefix(`/storage/v1`))
+        traefik.http.routers.deskcomm-supabase.entrypoints: ${TRAEFIK_ENTRYPOINT}
+        traefik.http.routers.deskcomm-supabase.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+        traefik.http.routers.deskcomm-supabase.priority: "500"
+        traefik.http.routers.deskcomm-supabase.service: deskcomm-supabase
+        traefik.http.services.deskcomm-supabase.loadbalancer.server.port: "8000"
+
+volumes:
+  db-config:
+
+networks:
+  deskcomm_net:
+    external: true
+    name: deskcomm_net
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK}
