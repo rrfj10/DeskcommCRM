@@ -6,6 +6,7 @@ set -euo pipefail
 
 : "${STACK:?}" "${IMAGE_OWNER:?}" "${DESKCOMM_VERSION:?}" "${POSTGRES_PASSWORD:?}"
 : "${SERVICE_ROLE_KEY:?}" "${OWNER_EMAIL:?}" "${OWNER_PASSWORD:?}"
+: "${NUVEMSHOP_OAUTH_ENCRYPTION_KEY:?}" "${CPF_ENCRYPTION_KEY:?}"
 URL="postgresql://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres"
 BASELINE=/schema/baseline.sql
 MARCA=/estado/baseline.sha256
@@ -51,6 +52,16 @@ reaplicar() {
   done
   printf '%s\n' "$erros" | awk 'NF && ++i <= 20' >&2
   return 1
+}
+
+# As funções de cifra leem a chave do banco, não do ambiente. Sem a linha, nenhum
+# segredo é gravado e contato é salvo sem CPF. Vale ensure_encryption_key, do kit.
+semear_chaves() {
+  psql "$URL" -v ON_ERROR_STOP=1 -q -v cifra="$NUVEMSHOP_OAUTH_ENCRYPTION_KEY" -v cpf="$CPF_ENCRYPTION_KEY" <<'SQL'
+insert into private.app_secrets (name, value)
+values ('nuvemshop_oauth_key', :'cifra'), ('cpf_key', :'cpf')
+on conflict (name) do update set value = excluded.value, updated_at = now();
+SQL
 }
 
 criar_dono() {
@@ -115,6 +126,7 @@ else
   echo "Schema sem mudança"
 fi
 printf '%s\n' "$atual" > "$MARCA"
+semear_chaves
 psql "$URL" -q -c "notify pgrst, 'reload schema'" >/dev/null
 
 [ "$(sql "select count(*) from public.platform_admins where revoked_at is null")" != "0" ] || criar_dono
