@@ -30,3 +30,6 @@ scratchpad
 evidence
 .superpowers
 *.tsbuildinfo
+
+# Stack preenchida e chaves da instalação pelo Portainer
+deploy/portainer/privado/

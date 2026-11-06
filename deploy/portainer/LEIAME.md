@@ -18,7 +18,7 @@ No seu computador, na raiz do repositório:
 ```bash
 python3 deploy/portainer/gerar-stack.py --domain SEU_DOMINIO --owner SEU_EMAIL \
   --traefik-network REDE_DO_TRAEFIK --certresolver SEU_CERTRESOLVER
-pbcopy < ~/.deskcomm-portainer/stack.yml
+pbcopy < deploy/portainer/privado/stack.yml
 ```
 
 No Portainer: **Stacks › Add stack**, nome `deskcomm` (exatamente esse), cole no
@@ -26,7 +26,7 @@ No Portainer: **Stacks › Add stack**, nome `deskcomm` (exatamente esse), cole 
 
 O serviço `deskcomm_setup` aplica o schema e cria o dono, e termina como `Complete`.
 Leva alguns minutos. A senha do primeiro acesso é a linha `OWNER_PASSWORD` de
-`~/.deskcomm-portainer/chaves.env`.
+`deploy/portainer/privado/chaves.env`.
 
 **Guarde `chaves.env` fora do computador.** Sem esse arquivo, os dados cifrados do
 banco não voltam num restauro. A stack colada tem as mesmas chaves: não a compartilhe.

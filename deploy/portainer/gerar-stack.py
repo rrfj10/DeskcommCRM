@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Gera a stack pronta para colar no Portainer, com domínio e chaves preenchidos.
 
-Rode no seu computador. As chaves ficam em ~/.deskcomm-portainer/chaves.env e rodar
-de novo reaproveita todas. Nada disso vai para o Git.
+Rode no seu computador. Stack e chaves ficam em deploy/portainer/privado/, que o Git
+ignora, e rodar de novo reaproveita as chaves.
 
     python3 deploy/portainer/gerar-stack.py --domain crm.empresa.com.br \
       --owner voce@empresa.com.br --traefik-network dcnet \
@@ -71,7 +71,7 @@ def main():
     a.add_argument("--entrypoint", default="websecure")
     a.add_argument("--version", default="3f-custom")
     a.add_argument("--image-owner", default="rrfj10")
-    a.add_argument("--saida", default="~/.deskcomm-portainer")
+    a.add_argument("--saida", default=str(Path(__file__).parent / "privado"))
     o = a.parse_args()
 
     pasta = Path(o.saida).expanduser()
