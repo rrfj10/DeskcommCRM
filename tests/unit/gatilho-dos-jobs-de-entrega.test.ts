@@ -64,7 +64,23 @@ const DIR = join(process.cwd(), ".github/workflows");
  * que desliga um job de entrega fica visível em code review.
  */
 const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string }> = {
-  // --- a cadeia que leva o conserto até a VPS ---------------------------------
+  "imagens-3f-custom.yml::publicar": {
+    condicao: null,
+    efeito:
+      "Publica as imagens do fork a cada push na 3f-custom. Sem ele, a VPS do fork " +
+      "para de receber as personalizações.",
+  },
+  "imagens-3f-custom.yml::provar": {
+    condicao: null,
+    efeito:
+      "Sobe a stack num Swarm descartável antes de a VPS receber a versão. Sem ele, " +
+      "imagem quebrada chega à VPS do fork.",
+  },
+  "imagens-3f-custom.yml::implantar": {
+    condicao: "github.ref_name == '3f-custom'",
+    efeito:
+      "Chama o setup da VPS do fork. Desligado, as imagens saem e nada muda na VPS.",
+  },
   "release.yml::abrir-pr-de-release": {
     condicao: "github.event_name == 'workflow_dispatch'",
     efeito:

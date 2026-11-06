@@ -1,0 +1,437 @@
+# Stack única do DeskcommCRM para Portainer (Docker Swarm). Molde: quem gera a
+# versão de colar é gerar-stack.py, que preenche domínio e chaves. O nome da stack
+# no Portainer tem de ser "deskcomm". Ver LEIAME.md.
+# Módulos de voz e telefonia (wacalls, asterisk, voice-agent) não entram aqui.
+
+x-deploy: &deploy
+  mode: replicated
+  replicas: 1
+  placement:
+    constraints: [node.role == manager]
+  restart_policy:
+    condition: any
+    delay: 5s
+
+x-crm-env: &crm-env
+  NEXT_PUBLIC_SUPABASE_URL: https://${DOMAIN}
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+  NEXT_PUBLIC_APP_URL: https://${DOMAIN}
+  NEXT_PUBLIC_ADMIN_URL: https://${DOMAIN}
+  SUPABASE_SERVER_URL: http://supabase-gw:8000
+  SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+  SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+  APP_NAME: DeskcommCRM
+  APP_LOCALE: pt-BR
+  NODE_ENV: production
+  NUVEMSHOP_ENABLED: "false"
+  INTERNAL_AGENT_RUN_STUB: "false"
+  WAHA_WEBHOOK_REQUIRE_SIGNATURE: "false"
+  SENTRY_DSN: "off"
+  INTERNAL_SECRET: ${INTERNAL_SECRET}
+  INTERNAL_CRON_SECRET: ${INTERNAL_CRON_SECRET}
+  NUVEMSHOP_OAUTH_ENCRYPTION_KEY: ${NUVEMSHOP_OAUTH_ENCRYPTION_KEY}
+  CPF_ENCRYPTION_KEY: ${CPF_ENCRYPTION_KEY}
+  AI_CRED_AES_KEY: ${AI_CRED_AES_KEY}
+  WAHA_BYO_ENCRYPTION_KEY: ${WAHA_BYO_ENCRYPTION_KEY}
+  IMPERSONATE_COOKIE_SECRET: ${IMPERSONATE_COOKIE_SECRET}
+  LGPD_SIGNING_KEY: ${LGPD_SIGNING_KEY}
+  WAHA_HMAC_SECRET: ${WAHA_HMAC_SECRET}
+  WAHA_API_BASE_URL: http://waha:3000
+  WAHA_WEBHOOK_BASE_URL: http://app:3000
+  WAHA_API_KEY: ${WAHA_API_KEY}
+  WAHA_API_KEY_SHA512: ${WAHA_API_KEY_SHA512}
+  UPSTASH_REDIS_REST_URL: http://srh:80
+  UPSTASH_REDIS_REST_TOKEN: ${SRH_TOKEN}
+  SHUTDOWN_GRACE_MS: "30000"
+
+services:
+  setup:
+    image: ghcr.io/${IMAGE_OWNER}/deskcomm-setup:${DESKCOMM_VERSION}
+    environment:
+      STACK: deskcomm
+      IMAGE_OWNER: ${IMAGE_OWNER}
+      DESKCOMM_VERSION: ${DESKCOMM_VERSION}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      OWNER_EMAIL: ${OWNER_EMAIL}
+      OWNER_PASSWORD: ${OWNER_PASSWORD}
+    volumes:
+      - setup-estado:/estado
+      # Pausa e atualiza os serviços do CRM. Só existe neste serviço.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [interno]
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+      restart_policy:
+        condition: none
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 256M
+
+  db:
+    image: ghcr.io/${IMAGE_OWNER}/deskcomm-db:${DESKCOMM_VERSION}
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: "5432"
+      POSTGRES_PORT: "5432"
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: postgres
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: "3600"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      interno:
+        aliases: [supabase-db]
+    stop_grace_period: 60s
+    deploy:
+      <<: *deploy
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 2048M
+
+  auth:
+    image: supabase/gotrue:v2.196.0
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: https://${DOMAIN}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      GOTRUE_DB_MAX_IDLE_POOL_SIZE: "10"
+      GOTRUE_DB_CONN_MAX_IDLE_TIME: 5m
+      GOTRUE_SITE_URL: https://${DOMAIN}
+      GOTRUE_URI_ALLOW_LIST: https://${DOMAIN}/auth/confirm,https://${DOMAIN}/**
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: https://${DOMAIN}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM_EMAIL:-admin@example.com}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-supabase-mail}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-2500}
+      GOTRUE_SMTP_USER: ${SMTP_USERNAME:-fake_mail_user}
+      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-fake_mail_password}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_FROM_NAME:-DeskcommCRM}
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://app:3000/email-templates/confirmation
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://app:3000/email-templates/recovery
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_SMS_AUTOCONFIRM: "false"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+
+  rest:
+    image: postgrest/postgrest:v14.17
+    command: ["postgrest"]
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_MAX_ROWS: "1000"
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: "3600"
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+
+  realtime:
+    image: supabase/realtime:v2.134.10
+    environment:
+      PORT: "4000"
+      DB_HOST: supabase-db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: SET search_path TO _realtime
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      interno:
+        # O gateway chama este nome, e o Realtime tira o tenant dele.
+        aliases: [realtime-dev.supabase-realtime]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 512M
+
+  storage:
+    image: supabase/storage-api:v1.74.0
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+      STORAGE_PUBLIC_URL: https://${DOMAIN}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      GLOBAL_S3_BUCKET: stub
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+    volumes:
+      - storage-data:/var/lib/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 512M
+
+  api-gw:
+    image: ghcr.io/${IMAGE_OWNER}/deskcomm-gw:${DESKCOMM_VERSION}
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEY: ""
+      SUPABASE_SECRET_KEY: ""
+      ANON_KEY_ASYMMETRIC: ""
+      SERVICE_ROLE_KEY_ASYMMETRIC: ""
+      SUPABASE_PUBLIC_URL: https://${DOMAIN}
+      DASHBOARD_USERNAME: supabase
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      interno:
+        aliases: [supabase-gw]
+      proxy: {}
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 256M
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: ${TRAEFIK_NETWORK}
+        traefik.http.routers.deskcomm-supabase.rule: Host(`${DOMAIN}`) && (PathPrefix(`/auth/v1`) || PathPrefix(`/rest/v1`) || PathPrefix(`/realtime/v1`) || PathPrefix(`/storage/v1`))
+        traefik.http.routers.deskcomm-supabase.entrypoints: ${TRAEFIK_ENTRYPOINT}
+        traefik.http.routers.deskcomm-supabase.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+        traefik.http.routers.deskcomm-supabase.priority: "500"
+        traefik.http.routers.deskcomm-supabase.service: deskcomm-supabase
+        traefik.http.services.deskcomm-supabase.loadbalancer.server.port: "8000"
+
+  app:
+    image: ghcr.io/${IMAGE_OWNER}/deskcommcrm:${DESKCOMM_VERSION}
+    environment:
+      <<: *crm-env
+      EVENT_LOG_WORKER_DRAINS: "true"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3000,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    networks:
+      interno:
+        aliases: [app]
+      proxy: {}
+    deploy:
+      <<: *deploy
+      update_config:
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          memory: 1024M
+      labels:
+        traefik.enable: "true"
+        traefik.swarm.network: ${TRAEFIK_NETWORK}
+        traefik.http.routers.deskcomm.rule: Host(`${DOMAIN}`)
+        traefik.http.routers.deskcomm.entrypoints: ${TRAEFIK_ENTRYPOINT}
+        traefik.http.routers.deskcomm.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+        traefik.http.routers.deskcomm.service: deskcomm
+        traefik.http.services.deskcomm.loadbalancer.server.port: "3000"
+        # O webhook do WAHA só vale pela rede interna: da internet, é recusado.
+        traefik.http.routers.deskcomm-waha-block.rule: Host(`${DOMAIN}`) && Path(`/api/v1/webhooks/waha`)
+        traefik.http.routers.deskcomm-waha-block.entrypoints: ${TRAEFIK_ENTRYPOINT}
+        traefik.http.routers.deskcomm-waha-block.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+        traefik.http.routers.deskcomm-waha-block.priority: "1000"
+        traefik.http.routers.deskcomm-waha-block.service: deskcomm
+        traefik.http.routers.deskcomm-waha-block.middlewares: deskcomm-deny
+        traefik.http.middlewares.deskcomm-deny.ipallowlist.sourcerange: 192.0.2.1/32
+
+  worker:
+    image: ghcr.io/${IMAGE_OWNER}/deskcomm-worker:${DESKCOMM_VERSION}
+    environment:
+      <<: *crm-env
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 40s
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 512M
+
+  scheduler:
+    image: ghcr.io/${IMAGE_OWNER}/deskcomm-scheduler:${DESKCOMM_VERSION}
+    environment:
+      TZ: UTC
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 64M
+
+  waha:
+    image: devlikeapro/waha:latest-2026.7.2
+    environment:
+      WAHA_API_KEY: sha512:${WAHA_API_KEY_SHA512}
+      WHATSAPP_HOOK_URL: http://app:3000/api/v1/webhooks/waha
+      WHATSAPP_HOOK_EVENTS: message.any,message.ack,message.edited,message.revoked,message.reaction,session.status,state.change
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_HMAC_SECRET}
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      WAHA_DASHBOARD_ENABLED: "false"
+      WHATSAPP_RESTART_ALL_SESSIONS: "True"
+    volumes:
+      - waha-data:/app/.sessions
+      - waha-media:/app/.media
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      update_config:
+        order: stop-first
+      resources:
+        limits:
+          memory: 1280M
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 128M
+
+  srh:
+    image: hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: ${SRH_TOKEN}
+      SRH_CONNECTION_STRING: redis://redis:6379
+    networks: [interno]
+    deploy:
+      <<: *deploy
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  db-data:
+  db-config:
+  storage-data:
+  setup-estado:
+  waha-data:
+  waha-media:
+
+networks:
+  interno:
+    driver: overlay
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK}

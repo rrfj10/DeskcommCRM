@@ -1,0 +1,110 @@
+name: Imagens da 3f-custom
+
+# Publica as imagens do fork, prova a stack num Swarm descartável e, na 3f-custom,
+# chama o webhook do serviço setup no Portainer. Quem aplica o schema e atualiza os
+# serviços é o setup. Fica separado do publish-image.yml, que só reage à main, para
+# a sincronização com o projeto original não dar conflito.
+#
+# Só linux/amd64: é a arquitetura da VPS, e o build leva metade do tempo.
+# Segredo do repositório: PORTAINER_WEBHOOK_SETUP. Sem ele, publica e não atualiza.
+
+on:
+  push:
+    branches: ["3f-custom"]
+
+# Sem cancelar: uma atualização cortada ao meio deixa serviços em versões diferentes.
+concurrency:
+  group: imagens-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: deskcommcrm
+            dockerfile: Dockerfile
+          - name: deskcomm-worker
+            dockerfile: Dockerfile.worker
+          - name: deskcomm-scheduler
+            dockerfile: Dockerfile.scheduler
+          - name: deskcomm-db
+            dockerfile: deploy/portainer/imagens/db.Dockerfile
+          - name: deskcomm-gw
+            dockerfile: deploy/portainer/imagens/gw.Dockerfile
+          - name: deskcomm-setup
+            dockerfile: deploy/portainer/imagens/setup.Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolver versão
+        id: ver
+        run: echo "curta=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build e push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ steps.ver.outputs.curta }}
+            ${{ github.ref_name == '3f-custom' && format('{0}/{1}/{2}:3f-custom', env.REGISTRY, github.repository_owner, matrix.name) || '' }}
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.curta }}
+          cache-from: type=gha,scope=3f-custom-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=3f-custom-${{ matrix.name }}
+
+  provar:
+    needs: publicar
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir a stack e conferir
+        run: bash deploy/portainer/prova.sh "sha-${GITHUB_SHA::7}" "$GITHUB_REPOSITORY_OWNER"
+
+  implantar:
+    needs: provar
+    if: github.ref_name == '3f-custom'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Chamar o setup no Portainer
+        env:
+          WEBHOOK: ${{ secrets.PORTAINER_WEBHOOK_SETUP }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::Falta o segredo PORTAINER_WEBHOOK_SETUP: VPS não atualizada."
+            exit 0
+          fi
+          curl -fsS -o /dev/null -X POST --max-time 120 "$WEBHOOK"
