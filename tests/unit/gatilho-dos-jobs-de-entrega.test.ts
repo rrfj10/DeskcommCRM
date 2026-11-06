@@ -70,13 +70,18 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Publica as imagens do fork a cada push na 3f-custom. Sem ele, a VPS do fork " +
       "para de receber as personalizações.",
   },
-  "imagens-3f-custom.yml::implantar": {
-    condicao: "github.event_name == 'push' || inputs.implantar",
+  "imagens-3f-custom.yml::provar": {
+    condicao: null,
     efeito:
-      "Atualiza a VPS do fork pelos webhooks do Portainer. Desligado, as imagens saem " +
-      "e nada muda na VPS. O pulo é deliberado só em execução manual sem implantar.",
+      "Sobe a stack num Swarm descartável antes de a VPS receber a versão. Sem ele, " +
+      "imagem quebrada chega à VPS do fork.",
   },
-  // --- a cadeia que leva o conserto até a VPS ---------------------------------
+  "imagens-3f-custom.yml::implantar": {
+    condicao: "github.ref_name == '3f-custom'",
+    efeito:
+      "Chama o setup da VPS do fork. Desligado, as imagens saem e nada muda na VPS. " +
+      "O pulo é deliberado só na branch de trabalho da própria stack.",
+  },
   "release.yml::abrir-pr-de-release": {
     condicao: "github.event_name == 'workflow_dispatch'",
     efeito:
