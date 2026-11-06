@@ -24,11 +24,11 @@ docker network create --driver overlay dcnet >/dev/null
 docker service create -q --name traefik_traefik --network dcnet \
   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
   --publish mode=host,target=80,published=80 --publish mode=host,target=443,published=443 \
-  traefik:v3.6 --providers.swarm=true --providers.swarm.exposedbydefault=false \
+  traefik:v3.7.16 --log.level=DEBUG --providers.swarm=true --providers.swarm.exposedbydefault=false \
   --providers.swarm.network=dcnet --entrypoints.web.address=:80 --entrypoints.websecure.address=:443 \
   --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true \
   --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web \
-  --certificatesresolvers.letsencryptresolver.acme.caserver=https://127.0.0.1:1/directory \
+  --certificatesresolvers.letsencryptresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory \
   --certificatesresolvers.letsencryptresolver.acme.email=teste@example.com \
   --certificatesresolvers.letsencryptresolver.acme.storage=/tmp/acme.json >/dev/null
 
@@ -64,6 +64,11 @@ exige "RLS sem login" "$($C -H "apikey: $ANON_KEY" "$U/rest/v1/organizations?sel
 exige "realtime" "$($C --http1.1 -o /dev/null -w '%{http_code}' --max-time 4 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$U/realtime/v1/websocket?apikey=$ANON_KEY&vsn=1.0.0")" 101
 echo "buckets: $($C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$U/storage/v1/bucket" | cut -c1-160)"
+
+passo traefik
+docker service inspect deskcomm_app --format '{{json .Spec.Labels}}' | cut -c1-600
+docker service logs --raw --tail 400 traefik_traefik 2>&1 | grep -iE 'deskcomm|resolver|network|error' \
+  | sed -E 's/eyJ[A-Za-z0-9._-]+/<jwt>/g' | tail -30 | cut -c1-260
 
 passo atualização com schema
 docker service update --detach --force --env-add FORCAR_SCHEMA=1 deskcomm_setup >/dev/null
