@@ -206,3 +206,6 @@ caddy-sites/*
 
 # Curso ilustrado — fotos e site gerados (curso/capturar.ts, curso/montar.ts)
 curso/saida/
+
+# Stack preenchida e chaves da instalação pelo Portainer
+deploy/portainer/privado/

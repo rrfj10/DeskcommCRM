@@ -64,6 +64,10 @@ exige "RLS com login" "$($C -H "apikey: $ANON_KEY" -H "Authorization: Bearer $T"
 exige "sem login não vaza" "$($C -H "apikey: $ANON_KEY" "$U/rest/v1/organizations?select=slug" | grep -c minha-empresa)" 0
 exige "realtime" "$($C --http1.1 -o /dev/null -w '%{http_code}' --max-time 4 -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
   -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$U/realtime/v1/websocket?apikey=$ANON_KEY&vsn=1.0.0")" 101
+cifra() { $C -X POST "$U/rest/v1/rpc/$1" -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H 'Content-Type: application/json' -d "$2" | grep -cE '^"\\+x[0-9a-f]+"$'; }
+exige "cifra de segredos" "$(cifra fn_encrypt_oauth '{"plaintext":"x"}')" 1
+exige "cifra do CPF" "$(cifra encrypt_cpf '{"p_plaintext":"12345678901"}')" 1
 echo "buckets: $($C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$U/storage/v1/bucket" | cut -c1-160)"
 
 passo traefik
