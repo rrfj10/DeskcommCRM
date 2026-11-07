@@ -64,6 +64,76 @@ on conflict (name) do update set value = excluded.value, updated_at = now();
 SQL
 }
 
+# ── O SMTP da tela chega ao serviço de login ────────────────────────────────
+#
+# O GoTrue self-hosted NÃO tem API de configuração: o servidor de e-mail dele
+# mora no env do serviço. O molde da stack apontava para `supabase-mail`, que
+# não existe aqui, então o cadastro por convite morria em "Error sending
+# confirmation email" enquanto a tela Admin → E-mail dizia "Em uso" — ela
+# configura o SMTP do CRM, que é outro caminho (lib/email/roteador.ts). Medido
+# na stack do Portainer em 2026-11-06.
+#
+# A fonte é a MESMA do app, na precedência de lib/email/config.ts: a linha de
+# platform_smtp_settings (a tela). Decifra com fn_decrypt_oauth, cuja chave
+# `semear_chaves` acabou de gravar no banco — por isso esta função roda DEPOIS
+# dela. Sem linha, NÃO mexe: quem configurou direto no env do serviço manda, e
+# sobrescrever com vazio trocaria uma instalação que envia por uma que não
+# envia. Sem nenhum dos dois, avisa — é o mesmo estado que quebra "esqueci a
+# senha".
+#
+# `docker service update --env-add` atualiza a chave se ela já existir, e só é
+# chamado quando algo mudou: reiniciar o auth em todo deploy seria efeito
+# colateral de graça.
+sincronizar_smtp_do_gotrue() {
+  local sep=$'\x1f' linha="" host="" porta="587" usuario="" senha="" remetente="" nome=""
+  local atual="" img="${STACK}_auth" falta=0 par
+  local pares=() args=()
+  atual="$(docker service inspect \
+    --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' \
+    "$img" 2>/dev/null || true)"
+  linha="$(psql "$URL" -tA -F "$sep" -c "select coalesce(smtp_host,''), smtp_port,
+      coalesce(smtp_username,''),
+      coalesce(case when smtp_password_encrypted is null then '' else public.fn_decrypt_oauth(smtp_password_encrypted) end,''),
+      coalesce(from_email,''), coalesce(from_name,'')
+    from public.platform_smtp_settings where id = 1" 2>/dev/null)" || linha=""
+  if [ -n "$linha" ]; then
+    IFS="$sep" read -r host porta usuario senha remetente nome <<<"$linha"
+  fi
+  if [ -z "$host" ] || [ -z "$remetente" ]; then
+    if printf '%s\n' "$atual" | grep -qE '^GOTRUE_SMTP_HOST=.+'; then
+      echo "E-mail do login: configurado no próprio serviço; a tela não tem SMTP para impor"
+    else
+      echo "AVISO: sem servidor de e-mail em Admin → E-mail. O login continua sem mandar confirmação de cadastro nem 'esqueci a senha'."
+    fi
+    return 0
+  fi
+  pares=(
+    "GOTRUE_SMTP_HOST=$host"
+    "GOTRUE_SMTP_PORT=${porta:-587}"
+    "GOTRUE_SMTP_USER=$usuario"
+    "GOTRUE_SMTP_PASS=$senha"
+    "GOTRUE_SMTP_ADMIN_EMAIL=$remetente"
+  )
+  # Nome do remetente em branco não vira env: quem instalou pode tê-lo posto no
+  # serviço à mão, e a marca do produto não é deste arquivo (é a do banco).
+  [ -z "$nome" ] || pares+=("GOTRUE_SMTP_SENDER_NAME=$nome")
+  for par in "${pares[@]}"; do
+    printf '%s\n' "$atual" | grep -Fqx "$par" || falta=1
+  done
+  if [ "$falta" = 0 ]; then
+    echo "E-mail do login já estava em dia"
+    return 0
+  fi
+  for par in "${pares[@]}"; do args+=(--env-add "$par"); done
+  # --detach: o setup não fica esperando o auth subir; a stack já o reinicia.
+  if docker service update --detach "${args[@]}" "$img" >/dev/null 2>&1; then
+    echo "E-mail do login atualizado a partir de Admin → E-mail"
+  else
+    echo "AVISO: não deu para aplicar o e-mail em $img; confira o serviço no Portainer."
+  fi
+  return 0
+}
+
 criar_dono() {
   echo "Criando o dono ($OWNER_EMAIL)"
   local i
@@ -127,6 +197,9 @@ else
 fi
 printf '%s\n' "$atual" > "$MARCA"
 semear_chaves
+# Depois de semear: a senha do SMTP é cifrada com a chave que acabou de ir para
+# o banco, e fn_decrypt_oauth não abre o envelope antes disso.
+sincronizar_smtp_do_gotrue
 psql "$URL" -q -c "notify pgrst, 'reload schema'" >/dev/null
 
 [ "$(sql "select count(*) from public.platform_admins where revoked_at is null")" != "0" ] || criar_dono
