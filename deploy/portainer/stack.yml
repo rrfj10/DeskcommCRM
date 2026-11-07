@@ -23,6 +23,10 @@ x-crm-env: &crm-env
   APP_NAME: DeskcommCRM
   APP_LOCALE: pt-BR
   NODE_ENV: production
+  # Uma VPS, um Supabase próprio: o serviço de login só manda e-mail pelo SMTP
+  # que o setup leva de Admin → E-mail (lib/email/estado.ts). Sem esta marca, o
+  # aviso "Sem SMTP configurado" e a recusa do "esqueci a senha" não acendem.
+  SINGLE_SERVER: "1"
   NUVEMSHOP_ENABLED: "false"
   INTERNAL_AGENT_RUN_STUB: "false"
   WAHA_WEBHOOK_REQUIRE_SIGNATURE: "false"
@@ -136,12 +140,10 @@ services:
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
       GOTRUE_MAILER_AUTOCONFIRM: "false"
-      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_FROM_EMAIL:-admin@example.com}
-      GOTRUE_SMTP_HOST: ${SMTP_HOST:-supabase-mail}
-      GOTRUE_SMTP_PORT: ${SMTP_PORT:-2500}
-      GOTRUE_SMTP_USER: ${SMTP_USERNAME:-fake_mail_user}
-      GOTRUE_SMTP_PASS: ${SMTP_PASSWORD:-fake_mail_password}
-      GOTRUE_SMTP_SENDER_NAME: ${SMTP_FROM_NAME:-DeskcommCRM}
+      # O SMTP do GoTrue NÃO se configura por aqui: quem o preenche é o setup,
+      # a partir de Admin → E-mail (sincronizar_smtp_do_gotrue, em
+      # imagens/setup.sh). Apontar para `supabase-mail` — que não existe nesta
+      # stack — deixava a confirmação de cadastro e o "esqueci a senha" mudos.
       GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify

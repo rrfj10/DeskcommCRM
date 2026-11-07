@@ -31,6 +31,30 @@ Leva alguns minutos. A senha do primeiro acesso é a linha `OWNER_PASSWORD` de
 **Guarde `chaves.env` fora do computador.** Sem esse arquivo, os dados cifrados do
 banco não voltam num restauro. A stack colada tem as mesmas chaves: não a compartilhe.
 
+## E-mail do login (confirmação de cadastro e "esqueci a senha")
+
+O produto tem **dois caminhos de e-mail**, configurados em lugares diferentes:
+
+| E-mail | Quem manda | Onde se configura |
+|---|---|---|
+| Convite da equipe, export de LGPD, alarme de SLA | o CRM | **Admin › E-mail** (grava no banco) |
+| Confirmação de cadastro e "esqueci a senha" | o serviço de login (`auth`) | env do serviço — **preenchido pelo `setup`** |
+
+O `setup` copia o SMTP de **Admin › E-mail** para o serviço `auth` a cada execução
+(função `sincronizar_smtp_do_gotrue`, em `imagens/setup.sh`), decifrando a senha no
+banco. A porta 465 (TLS direto) funciona; 587 (STARTTLS) é a alternativa se o
+provedor recusar.
+
+Consequências práticas:
+
+- **Depois de trocar o SMTP em Admin › E-mail**, o login só passa a usá-lo na próxima
+  execução do `setup`: dispare o webhook (veja *Atualização automática*) ou clique em
+  **Stacks › deskcomm › Update the stack**. A tela não reinicia o serviço sozinha.
+- Quem configurou o SMTP **direto no env do serviço `auth`** não é sobrescrito: sem
+  SMTP na tela, o `setup` não mexe em nada e o log avisa que o serviço já tem e-mail.
+- Sem SMTP em nenhum dos dois, o log do `setup` traz um `AVISO` — é o estado em que
+  confirmação de cadastro e "esqueci a senha" ficam mudos.
+
 ## Atualização automática
 
 Uma vez só:
