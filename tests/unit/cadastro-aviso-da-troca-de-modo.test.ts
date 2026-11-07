@@ -231,7 +231,7 @@ describe("na stack do Portainer, quem leva o modo ao GoTrue é o serviço setup"
 
     expect(screen.getByText(TITULO)).toBeInTheDocument();
     expect(screen.getByText(FRASE_DA_ISSUE)).toBeInTheDocument();
-    expect(screen.getByText(/Services › deskcomm_setup/).textContent).toMatch(/Force update/);
+    expect(screen.getByText(/serviço setup desta stack/).textContent).toMatch(/Force update/);
     expect(screen.queryByText(COMANDO)).toBeNull();
     expect(document.body.textContent).not.toMatch(/update\.sh/);
   });

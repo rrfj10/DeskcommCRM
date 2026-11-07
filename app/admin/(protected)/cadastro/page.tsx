@@ -89,7 +89,7 @@ export default async function Page() {
               {viaPortainer ? (
                 <p className="mt-2">
                   {traduzir(
-                    "Para aplicar agora, no Portainer abra Services › deskcomm_setup e clique em Update the service com Force update.",
+                    "Para aplicar agora, no Portainer abra Services, escolha o serviço setup desta stack e clique em Update the service com Force update.",
                     usuario.idioma,
                   )}
                 </p>
