@@ -11,6 +11,11 @@ name: Imagens da 3f-custom
 on:
   push:
     branches: ["3f-custom"]
+  pull_request:
+    branches: ["3f-custom"]
+    paths:
+      - "deploy/portainer/**"
+      - ".github/workflows/imagens-3f-custom.yml"
 
 # Sem cancelar: uma atualização cortada ao meio deixa serviços em versões diferentes.
 concurrency:
@@ -21,7 +26,24 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  identidade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      base_version: ${{ steps.base.outputs.base_version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Resolver a release base comprovada
+        id: base
+        run: bash deploy/portainer/identidade-build.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
   publicar:
+    # Candidatas de PR só são publicadas por branches deste mesmo fork.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: identidade
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -68,7 +90,11 @@ jobs:
           # A tag móvel só é promovida depois da prova, em outro job.
           tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ steps.ver.outputs.curta }}
           build-args: |
-            APP_VERSION=${{ steps.ver.outputs.curta }}
+            APP_VERSION=${{ needs.identidade.outputs.base_version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.identidade.outputs.base_version }}
           cache-from: type=gha,scope=3f-custom-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=3f-custom-${{ matrix.name }}
 
@@ -93,6 +119,8 @@ jobs:
         run: bash deploy/portainer/prova.sh "sha-${GITHUB_SHA::7}" "$GITHUB_REPOSITORY_OWNER"
 
   promover:
+    # A prova de um PR nunca move a tag consumida por instalações existentes.
+    if: github.event_name == 'push' && github.ref_name == '3f-custom'
     needs: provar
     runs-on: ubuntu-latest
     permissions:

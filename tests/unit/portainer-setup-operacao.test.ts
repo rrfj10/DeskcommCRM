@@ -170,6 +170,7 @@ describe("setup Portainer — conflitos, convergência e retomada", () => {
         esac
       }
       aguardar_replicas() { echo "$1 pronto"; }
+      instalar_observador() { :; }
       atualizar_servicos
       cat "$state/atualizados"
     `);
@@ -191,6 +192,7 @@ describe("setup Portainer — conflitos, convergência e retomada", () => {
       }
       aguardar_replicas() { return 1; }
       trap 'cat "$state/atualizados"' EXIT
+      instalar_observador() { :; }
       atualizar_servicos
     `);
     expect(r.status).toBe(1);
@@ -198,5 +200,37 @@ describe("setup Portainer — conflitos, convergência e retomada", () => {
     expect(r.stdout).not.toContain("deskcomm_worker");
     expect(r.stdout).not.toContain("Pronto.");
     expect(r.stderr).toContain("não ficou pronta");
+  });
+  it("instala o observador em uma stack antiga sem copiar as credenciais", () => {
+    const r = executar(`
+      STACK=deskcomm; IMAGE_OWNER=teste; DESKCOMM_VERSION=sha-teste
+      docker() {
+        if [ "$2" = inspect ]; then return 1; fi
+        printf '%s\\n' "$@" > "$state/create"
+      }
+      aguardar_replicas() { :; }
+      instalar_observador
+      cat "$state/create"
+    `);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("deskcomm_runtime");
+    expect(r.stdout).toContain("--runtime");
+    expect(r.stdout).toContain("br.portainer.runtime.stack=deskcomm");
+    expect(r.stdout).not.toContain("POSTGRES_PASSWORD");
+    expect(r.stdout).not.toContain("INTERNAL_SECRET");
+  });
+
+  it("atualiza o observador existente, sem criar outro", () => {
+    const r = executar(`
+      STACK=deskcomm; IMAGE_OWNER=teste; DESKCOMM_VERSION=sha-teste
+      docker() { if [ "$2" != inspect ]; then printf '%s\\n' "$@" > "$state/update"; fi; }
+      aguardar_replicas() { :; }
+      instalar_observador
+      cat "$state/update"
+    `);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("update");
+    expect(r.stdout).toContain("--args=--runtime");
+    expect(r.stdout).not.toContain("create");
   });
 });

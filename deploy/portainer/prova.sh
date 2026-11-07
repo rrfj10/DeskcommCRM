@@ -42,10 +42,10 @@ passo setup
 esperar_setup "instalação"
 for i in $(seq 1 60); do
   r="$(docker service ls --filter label=com.docker.stack.namespace=deskcomm --format '{{.Name}} {{.Replicas}}' | grep -v _setup | grep -c ' 1/1')"
-  [ "$r" = 12 ] && break; sleep 10
+  [ "$r" = 13 ] && break; sleep 10
 done
 docker service ls --format '{{.Name}} {{.Replicas}}'
-exige "serviços 1/1" "$r" 12
+exige "serviços 1/1" "$r" 13
 sleep 20
 
 passo checagens
@@ -69,6 +69,33 @@ cifra() { $C -X POST "$U/rest/v1/rpc/$1" -H "apikey: $SERVICE_ROLE_KEY" -H "Auth
 exige "cifra de segredos" "$(cifra fn_encrypt_oauth '{"plaintext":"x"}')" 1
 exige "cifra do CPF" "$(cifra encrypt_cpf '{"p_plaintext":"12345678901"}')" 1
 echo "buckets: $($C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$U/storage/v1/bucket" | cut -c1-160)"
+
+passo confirmação da versão em execução
+runtime_confirmado() {
+  $C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+    "$U/rest/v1/system_version?select=runtime_confirmation,agent_last_seen_at&id=eq.1" | python3 -c '
+import json,sys,datetime
+try:
+    row=json.load(sys.stdin)[0]
+    snapshot=row["runtime_confirmation"]
+    services=snapshot["services"]
+    now=datetime.datetime.now(datetime.timezone.utc)
+    age=(now-datetime.datetime.fromisoformat(snapshot["collected_at"].replace("Z","+00:00"))).total_seconds()
+    good=(not snapshot["issues"] and len(services)==3 and {s["role"] for s in services}=={"app","worker","scheduler"}
+          and all(s["running"] and s["healthy"] and s["source_verified"] for s in services)
+          and len({(s["revision"],s["base_version"],s["base_revision"]) for s in services})==1
+          and 0 <= age < 900)
+    sys.exit(0 if good else 1)
+except (ValueError,TypeError,KeyError,IndexError):
+    sys.exit(1)
+'
+}
+confirmado=nao
+for i in $(seq 1 60); do
+  if runtime_confirmado; then confirmado=sim; break; fi
+  sleep 5
+done
+exige "versão e serviços observados" "$confirmado" sim
 
 passo traefik
 docker service inspect deskcomm_app --format '{{json .Spec.Labels}}' | cut -c1-600

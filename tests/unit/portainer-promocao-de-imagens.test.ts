@@ -36,4 +36,12 @@ describe("promoção de imagens do Portainer", () => {
     expect(promover).toContain('--tag "$imagem:3f-custom" "$imagem:$versao"');
     expect(promover).toContain("set -euo pipefail");
   });
+  it("uma candidata de PR não promove a tag de produção", () => {
+    expect(job("promover")).toContain(
+      "if: github.event_name == 'push' && github.ref_name == '3f-custom'",
+    );
+    expect(job("publicar")).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository",
+    );
+  });
 });

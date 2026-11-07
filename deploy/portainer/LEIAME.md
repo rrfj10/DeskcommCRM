@@ -54,6 +54,39 @@ SQL já aplicado nem garante retorno à imagem anterior: o Portainer também pod
 ter atualizado serviços. Confira as tarefas e os logs em **Services › deskcomm_setup**.
 O rollback configurado no serviço app é diferente de rollback de banco.
 
+## Versão confirmada no rodapé
+
+O serviço `deskcomm_runtime` observa app, worker e scheduler a cada cinco minutos
+e envia um heartbeat autenticado pela rede interna. Usa os IDs reais dos
+containers/imagens, os healthchecks, a revisão OCI e uma release oficial
+comprovadamente ancestral do código do fork. A versão base aparece com a marca
+“Personalizada” quando a revisão do fork difere da release.
+
+O build resolve essa base pelas tags oficiais e pelo histórico Git, não pelo
+`package.json` (que mantém uma versão de desenvolvimento) nem pela tag móvel
+`3f-custom`. Se o build não comprovar uma release ancestral, a publicação falha.
+A prova da stack no CI exige uma observação completa gravada antes de promover
+as imagens para produção. PRs deste fork podem publicar/provar imagens por SHA;
+essas candidatas não movem a tag de produção nem chamam o webhook.
+
+Quem já colou a stack antiga recebe o observador pelo setup atualizado, sem
+copiar novamente chaves. Nesse caso o serviço aparece em **Services** como
+`deskcomm_runtime`, gerenciado pelo setup; a stack nova também o declara no molde.
+O serviço criado para a stack antiga usa um label próprio, para que um prune do
+editor legado não o apague. O socket do Docker fica no setup/observador, nunca no
+app. Como o setup, o observador tem autoridade do daemon; o mount `ro` não é uma
+restrição de operações da API do Docker. As credenciais de heartbeat são lidas
+da configuração do serviço app e não são copiadas para logs ou para o payload.
+
+Sem três serviços saudáveis, com revisões divergentes ou sem comprovação da
+origem, o aviso continua. Após quinze minutos sem observação válida, a confirmação
+vence. O processo reporta falhas nos logs de `deskcomm_runtime`; se não conseguir
+entregar os heartbeats, seu healthcheck também falha. Esta integração observa;
+não executa pedidos de atualização vindos do CRM nem anuncia versão nova do fork.
+A coleta é local ao manager, para a VPS de nó único deste kit. Um Swarm com
+containers distribuídos entre vários nós exige coleta remota autenticada e não
+é certificado por este observador.
+
 ## Diagnosticar erro na atualização
 
 O setup é uma tarefa finita: `0/1` após `Complete` com código 0 é esperado. Não

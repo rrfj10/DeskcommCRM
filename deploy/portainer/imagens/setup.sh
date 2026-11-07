@@ -144,6 +144,27 @@ end $$;
 SQL
 }
 
+# O setup antigo instala o observador ao receber a imagem nova. Assim quem já
+# colou a stack não precisa editar chaves ou acrescentar serviço manualmente.
+instalar_observador() {
+  local servico="${STACK}_runtime" imagem="ghcr.io/${IMAGE_OWNER}/deskcomm-setup:${DESKCOMM_VERSION}"
+  if docker service inspect "$servico" >/dev/null 2>&1; then
+    swarm_com_retry update --detach --image "$imagem" --args=--runtime "$servico" >/dev/null || return 1
+  else
+    swarm_com_retry create --detach --name "$servico" \
+      --label "br.portainer.runtime.stack=$STACK" \
+      --constraint 'node.role==manager' --network "${STACK}_interno" \
+      --mount 'type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly' \
+      --mount "type=volume,src=${STACK}_setup-estado,dst=/estado" \
+      --env "STACK=$STACK" --env "IMAGE_OWNER=$IMAGE_OWNER" \
+      --limit-memory 512M --restart-condition any \
+      --health-cmd 'test -n "$(find /tmp -maxdepth 1 -name runtime-ok -mmin -10 -print)"' \
+      --health-interval 60s --health-start-period 300s \
+      "$imagem" --runtime >/dev/null || return 1
+  fi
+  aguardar_replicas "$servico" 1
+}
+
 atualizar_servicos() {
   local par s replicas
   echo "Atualizando os serviços para $DESKCOMM_VERSION"
@@ -154,6 +175,7 @@ atualizar_servicos() {
     replicas="$(docker service inspect --format '{{.Spec.Mode.Replicated.Replicas}}' "$s")"
     aguardar_replicas "$s" "$replicas" || die "a atualização de $s não ficou pronta"
   done
+  instalar_observador || die "não foi possível iniciar a confirmação da versão"
   echo "Pronto."
 }
 
@@ -207,4 +229,7 @@ main() {
   atualizar_servicos
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  if [ "${1:-}" = --runtime ]; then exec python3 /runtime.py; fi
+  main "$@"
+fi
