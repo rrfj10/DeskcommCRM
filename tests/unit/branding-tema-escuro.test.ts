@@ -194,7 +194,6 @@ describe("o que o sistema ajustou, com as duas cores (#2482)", () => {
         // avisos do escuro que ele de fato pinta.
         expect(sigla(caso.camada({ accent_hex: SEMENTE_CLARA, accent_dark_hex: null }))).toEqual([
           "accent_deslocado|escuro|--color-accent",
-          "redundancia_nao_cromatica_necessaria|escuro|success",
         ]);
       });
     });

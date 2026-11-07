@@ -1,6 +1,7 @@
-# 02 — Paleta Sage
+# 02 — Paleta Sage clara e Dracula escura
 
-> **Source of truth:** `app/design/lib/tokens.ts` → `PALETTES.sage`
+> **Source of truth do produto:** `app/globals.css`. O showcase em `app/design/lib/tokens.ts` mantém as paletas exploratórias.
+> O modo claro usa Sage; o modo escuro usa Dracula. Cores de marca configuradas pela instalação ou organização continuam tendo precedência sobre o destaque padrão.
 
 ## Filosofia da paleta
 
@@ -51,45 +52,26 @@ A paleta tem **dois temas desenhados independentemente**, não invertidos. Light
 - `surfaceElevated`: `#f5f3ee` — alt-bg, header, dropdown bg
 - `text`: `#1c1a16` / `textMuted`: `#5d594f` / `border`: `#e7e3da`
 
-## Dark theme — accent (Sage verde, ajustado)
+## Dark theme — Dracula
 
-| Stop | Hex | Uso prescrito |
-|------|-----|---------------|
-| 50 | `#f3f6f1` | Texto sobre fundo accent escuro (raro) |
-| 100 | `#e4ebe0` | — |
-| 200 | `#c8d6c1` | — |
-| 300 | `#a4ba9a` | Hover state em link |
-| 400 | `#82a077` | **Brand accent em dark** — primary button bg, link, focus |
-| 500 | `#67885d` | Versão "calma" do accent em dark, alguns hovers |
-| 600 | `#506d48` | Hover ainda mais escuro (raro) |
-| 700 | `#41573b` | Border accent em dark |
-| 800 | `#374731` | Soft accent bg (badges) |
-| 900 | `#2f3c2b` | Soft accent bg (mais discreto) |
-| 950 | `#171f15` | Background quase invisível (decorativo) |
+O modo escuro existente usa Dracula, sem uma opção de tema adicional. A preferência claro/escuro/sistema continua no controle de tema atual.
 
-> **Nota:** em dark, o "primary" sobe pro stop 400 (mais luminoso) pra preservar contraste sobre fundos escuros.
+| Token | Hex / valor |
+|---|---|
+| Fundo | `#282a36` |
+| Superfície | `#21222c` |
+| Superfície elevada | `#343746` |
+| Texto | `#f8f8f2` |
+| Texto secundário | `#b8bbd0` |
+| Texto sutil | `#9da2bd` |
+| Borda | `#44475a` |
+| Borda forte | `#6272a4` |
+| Destaque (400) | `#bd93f9` |
+| Destaque hover (300) | `#d1b2ff` |
+| Frente do destaque | `#282a36` |
+| Fundo suave | `rgba(189, 147, 249, 0.16)` |
 
-## Dark theme — neutral greige
-
-| Stop | Hex | Uso prescrito |
-|------|-----|---------------|
-| 50 | `#f5f4ef` | `--ds-text` — texto primary em dark |
-| 100 | `#e6e4dc` | Texto sobre surface escuro (alta hierarquia) |
-| 200 | `#bbb8ac` | Texto importante em dark |
-| 300 | `#8e8b7f` | `--ds-text-muted` — texto secundário |
-| 400 | `#605e54` | Placeholder, helper |
-| 500 | `#444239` | Disabled |
-| 600 | `#33312a` | `--ds-border` — borders default |
-| 700 | `#272620` | `--ds-surface-elevated` — header, dropdown |
-| 800 | `#1d1c17` | `--ds-surface` — cards |
-| 900 | `#161510` | `--ds-bg` — page background (very-dark warm) |
-| 950 | `#0c0b08` | Voids decorativos (raro) |
-
-**Surfaces dark:**
-- `bg`: `#161510` — página (NÃO `#000` nem `#0a0a0a`; warm-tinted)
-- `surface`: `#1d1c17` — cards
-- `surfaceElevated`: `#272620` — header, dropdown
-- `text`: `#f5f4ef` / `textMuted`: `#8e8b7f` / `border`: `#33312a`
+A rampa completa mora no seletor `[data-theme="dark"]` do CSS global. As amostras claras restauram a rampa Sage para não herdarem os tons Dracula. A régua embarcada de branding é gerada desse CSS, inclusive para o build standalone e a cor da barra do navegador.
 
 ## Estados (success / warning / error / info)
 
@@ -97,10 +79,10 @@ Estados têm versões light e dark calibradas. Saturação fica ≤ 55% em light
 
 | Estado | Light | Dark | Uso |
 |--------|-------|------|-----|
-| `success` | `#5a8a5f` | `#82a077` | Confirmação positiva, status "ativo", "lido" |
-| `warning` | `#b07a2b` | `#d09455` | Atenção sem urgência, SLA próximo de vencer |
-| `error` | `#a94a3c` | `#c87263` | Erro, ação destrutiva, SLA estourado |
-| `info` | `#4a7a93` | `#7da9bf` | Mensagem informativa, dica |
+| `success` | `#5a8a5f` | `#50fa7b` | Confirmação positiva, status "ativo", "lido" |
+| `warning` | `#b07a2b` | `#f1fa8c` | Atenção sem urgência, SLA próximo de vencer |
+| `error` | `#a94a3c` | `#ff5555` | Erro, ação destrutiva, SLA estourado |
+| `info` | `#4a7a93` | `#8be9fd` | Mensagem informativa, dica |
 
 **Como aplicar estados (3 padrões):**
 
@@ -120,7 +102,7 @@ Estados têm versões light e dark calibradas. Saturação fica ≤ 55% em light
 
 ## Contraste WCAG
 
-Validações realizadas pela paleta:
+As razões abaixo são referências do tema claro. Para medir o contraste atual, incluindo superfícies Dracula e marca personalizada, execute `pnpm vitest run tests/unit/branding-contraste.test.ts tests/unit/branding-pares-pintados.test.ts`.
 
 | Combinação | Ratio | Nível | OK pra |
 |------------|-------|-------|--------|
@@ -128,8 +110,6 @@ Validações realizadas pela paleta:
 | `text-muted` (`#5d594f`) sobre `bg` | ~6.7:1 | AA+ | Secondary, helper, timestamps |
 | `accent-500` (`#67885d`) sobre `bg` | ~4.6:1 | AA | Texto UI 14px+, botão primary |
 | `accent-700` (`#41573b`) sobre `accent-soft` | ~7.2:1 | AAA | Link em chip, label sobre badge |
-| Dark: `text` (`#f5f4ef`) sobre `bg` (`#161510`) | ~14.1:1 | AAA | Body text |
-| Dark: `accent-400` (`#82a077`) sobre `bg` | ~5.9:1 | AA+ | Link, primary |
 | `error` light (`#a94a3c`) sobre `bg` | ~4.7:1 | AA | UI text 14px+ |
 
 **Regras:**

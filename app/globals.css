@@ -26,7 +26,7 @@
 
 /* ─────────────────────────────────────────────────────────────────────────
    DeskcommCRM — Design System tokens (Sage palette · density Aerada)
-   Source of truth: /app/design/lib/tokens.ts (PALETTES.sage)
+   Source of truth do produto: este arquivo (claro Sage; escuro Dracula).
    Light + dark drawn separately (NOT inverted).
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -337,25 +337,7 @@
   --agenda-pessoa-6: #608bda; /* índigo */
   --agenda-pessoa-7: #7b5bad; /* violeta */
   --agenda-pessoa-8: #cc77b1; /* framboesa */
-}
-
-[data-theme="dark"] {
-  /* Surfaces (dark — drawn) */
-  --color-bg: #161510;
-  --color-surface: #1d1c17;
-  --color-surface-elevated: #272620;
-  --color-overlay: rgba(0, 0, 0, 0.55);
-
-  /* Text (dark) */
-  --color-text: #f5f4ef;
-  --color-text-muted: #8e8b7f;
-  --color-text-subtle: #605e54;
-
-  /* Borders (dark) */
-  --color-border: #33312a;
-  --color-border-strong: #444239;
-
-  /* Accent stays same hex stops; default shifts up for dark contrast */
+  /* Restaura a rampa clara em amostras dentro de páginas Dracula. */
   --color-accent-50: #f3f6f1;
   --color-accent-100: #e4ebe0;
   --color-accent-200: #c8d6c1;
@@ -367,37 +349,67 @@
   --color-accent-800: #374731;
   --color-accent-900: #2f3c2b;
   --color-accent-950: #171f15;
+}
+
+[data-theme="dark"] {
+  /* Superfícies Dracula — tema escuro do produto. */
+  --color-bg: #282a36;
+  --color-surface: #21222c;
+  --color-surface-elevated: #343746;
+  --color-overlay: rgba(0, 0, 0, 0.55);
+
+  /* Text (dark) */
+  --color-text: #f8f8f2;
+  --color-text-muted: #b8bbd0;
+  --color-text-subtle: #9da2bd;
+
+  /* Borders (dark) */
+  --color-border: #44475a;
+  --color-border-strong: #6272a4;
+
+  /* Destaque Dracula; a marca configurada continua tendo precedência. */
+  --color-accent-50: #f6f0ff;
+  --color-accent-100: #ede0ff;
+  --color-accent-200: #dcc5ff;
+  --color-accent-300: #d1b2ff;
+  --color-accent-400: #bd93f9;
+  --color-accent-500: #a77ce3;
+  --color-accent-600: #8b5fc1;
+  --color-accent-700: #70469f;
+  --color-accent-800: #59377f;
+  --color-accent-900: #432960;
+  --color-accent-950: #281b3d;
   --color-accent: var(--color-accent-400);
-  --color-accent-fg: #161510;
-  --color-accent-soft: rgba(130, 160, 119, 0.16);
+  --color-accent-fg: #282a36;
+  --color-accent-soft: rgba(189, 147, 249, 0.16);
   --color-accent-hover: var(--color-accent-300);
 
-  /* Neutrals — greige (11 stops, dark) */
-  --color-neutral-50: #f5f4ef;
-  --color-neutral-100: #e6e4dc;
-  --color-neutral-200: #bbb8ac;
-  --color-neutral-300: #8e8b7f;
-  --color-neutral-400: #605e54;
-  --color-neutral-500: #444239;
-  --color-neutral-600: #33312a;
-  --color-neutral-700: #272620;
-  --color-neutral-800: #1d1c17;
-  --color-neutral-900: #161510;
-  --color-neutral-950: #0c0b08;
+  /* Neutros frios Dracula (11 tons). */
+  --color-neutral-50: #f8f8f2;
+  --color-neutral-100: #e5e6ef;
+  --color-neutral-200: #cdd0e1;
+  --color-neutral-300: #b8bbd0;
+  --color-neutral-400: #989db8;
+  --color-neutral-500: #6272a4;
+  --color-neutral-600: #44475a;
+  --color-neutral-700: #343746;
+  --color-neutral-800: #21222c;
+  --color-neutral-900: #282a36;
+  --color-neutral-950: #191a21;
 
   /* States (dark) */
-  --color-success: #82a077;
-  --color-success-bg: rgba(130, 160, 119, 0.18);
-  --color-success-fg: #a4ba9a;
-  --color-warning: #d09455;
-  --color-warning-bg: rgba(208, 148, 85, 0.18);
-  --color-warning-fg: #e0ad77;
-  --color-error: #c87263;
-  --color-error-bg: rgba(200, 114, 99, 0.18);
-  --color-error-fg: #d99182;
-  --color-info: #7da9bf;
-  --color-info-bg: rgba(125, 169, 191, 0.18);
-  --color-info-fg: #9bbfd2;
+  --color-success: #50fa7b;
+  --color-success-bg: rgba(80, 250, 123, 0.12);
+  --color-success-fg: #50fa7b;
+  --color-warning: #f1fa8c;
+  --color-warning-bg: rgba(241, 250, 140, 0.12);
+  --color-warning-fg: #f1fa8c;
+  --color-error: #ff5555;
+  --color-error-bg: rgba(255, 85, 85, 0.12);
+  --color-error-fg: #ff8585;
+  --color-info: #8be9fd;
+  --color-info-bg: rgba(139, 233, 253, 0.12);
+  --color-info-fg: #8be9fd;
 
   /* Shadows — heavier in dark */
   --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
@@ -426,7 +438,7 @@
   --input: var(--color-border);
   --ring: var(--color-accent-400);
   /* ---- Agenda · cor de pessoa (tema escuro) ----------------------------
-   * Mais claras e menos saturadas que as do claro: sobre `#161510` a versão
+   * Mais claras e menos saturadas que as do claro: sobre `#282a36` a versão
    * escura de cada matiz sumiria. Mesma ordem, mesmos nomes.
    */
   --agenda-pessoa-1: #f89080;

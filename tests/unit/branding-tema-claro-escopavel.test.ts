@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { GRAUS } from "@/lib/branding/rampa";
+import { razaoDeContraste } from "@/lib/branding/contraste";
 
 const RAIZ = process.cwd();
 const CSS = fs.readFileSync(path.join(RAIZ, "app/globals.css"), "utf8");
@@ -24,12 +24,16 @@ function blocoDe(seletor: string): Map<string, string> {
     if (linha === "}") return decls;
     if (!linha.startsWith("--")) continue;
     const corte = linha.indexOf(":");
-    decls.set(linha.slice(0, corte).trim(), linha.slice(corte + 1).replace(/;$/, "").trim());
+    decls.set(
+      linha.slice(0, corte).trim(),
+      linha
+        .slice(corte + 1)
+        .replace(/;$/, "")
+        .trim(),
+    );
   }
   throw new Error(`o bloco \`${seletor}\` não fecha`);
 }
-
-const RAMPA = new Set(GRAUS.map((g) => `--color-accent-${g}`));
 
 describe("tema claro escopável em subárvore", () => {
   // Lido DENTRO de cada caso, não no corpo do describe: `blocoDe` lança quando o
@@ -44,20 +48,12 @@ describe("tema claro escopável em subárvore", () => {
     expect(claro.size).toBeGreaterThan(0);
   });
 
-  it("espelha EXATAMENTE o que o tema escuro sobrescreve, menos a rampa", () => {
+  it("espelha todos os tokens escuros, incluindo a rampa que difere entre os temas", () => {
     const claro = blocoDe('[data-theme="light"]');
     const escuro = blocoDe('[data-theme="dark"]');
-    // Custom property herdada não volta ao valor do `:root` dentro de uma
-    // subárvore (`initial`/`revert` a deixam SEM valor), então redeclarar é
-    // obrigação da linguagem. O conjunto certo é o que o escuro sobrescreve: o
-    // que só existe no `:root` é herdado sem problema.
-    //
-    // A rampa fica de fora de propósito: as 11 paradas são idênticas nos dois
-    // blocos do produto (omiti-las não muda pixel), e assim uma subárvore clara
-    // herda a rampa do <html> — a do revendedor — em vez de fixar a Sage.
-    const esperado = [...escuro.keys()].filter((k) => !RAMPA.has(k)).sort();
-    expect([...claro.keys()].sort()).toEqual(esperado);
-    for (const k of claro.keys()) expect(RAMPA.has(k), k).toBe(false);
+    // A amostra clara precisa restaurar também os tons Sage: o escuro é Dracula.
+    expect([...claro.keys()].sort()).toEqual([...escuro.keys()].sort());
+    expect(claro.get("--color-accent-400")).not.toBe(escuro.get("--color-accent-400"));
   });
 
   it("cada valor espelhado é o mesmo do `:root`", () => {
@@ -109,5 +105,22 @@ describe("indicador de foco no modo de alto contraste", () => {
     // um rider que não pinta nada.
     const bloco = /@media \(forced-colors: active\) \{[\s\S]*?\n {2}\}/.exec(CSS)?.[0] ?? "";
     expect(bloco).not.toContain("var(--");
+  });
+});
+
+
+describe("legibilidade do tema Dracula", () => {
+  it("mantém texto, destaques e estados acima de 4,5:1 nas três superfícies", () => {
+    const escuro = blocoDe('[data-theme="dark"]');
+    const textos = ["text", "text-muted", "text-subtle", "accent-400", "accent-300", "success-fg", "warning-fg", "error-fg", "info-fg"];
+    for (const superficie of ["bg", "surface", "surface-elevated"]) {
+      const fundo = escuro.get(`--color-${superficie}`);
+      expect(fundo).toMatch(/^#[0-9a-f]{6}$/);
+      for (const texto of textos) {
+        const frente = escuro.get(`--color-${texto}`);
+        expect(frente).toMatch(/^#[0-9a-f]{6}$/);
+        expect(razaoDeContraste(frente!, fundo!), `${texto} sobre ${superficie}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 });
