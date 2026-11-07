@@ -221,6 +221,22 @@ describe("com Supabase separado, o update.sh não leva o modo ao GoTrue", () => 
   });
 });
 
+describe("na stack do Portainer, quem leva o modo ao GoTrue é o serviço setup", () => {
+  it("'só convite' com o GoTrue aberto → ensina o Force update do setup, sem update.sh", async () => {
+    vi.stubEnv("INSTALACAO_VIA", "portainer");
+    cena.modo = "so_convite";
+    cena.settings = { disable_signup: false };
+
+    await abrirTela();
+
+    expect(screen.getByText(TITULO)).toBeInTheDocument();
+    expect(screen.getByText(FRASE_DA_ISSUE)).toBeInTheDocument();
+    expect(screen.getByText(/Services › deskcomm_setup/).textContent).toMatch(/Force update/);
+    expect(screen.queryByText(COMANDO)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/update\.sh/);
+  });
+});
+
 describe("a régua do aviso é a mesma do kit (#1665)", () => {
   it("só o modo 'so convite' espera disable_signup=true", () => {
     expect(disableSignupEsperado("so_convite")).toBe(true);

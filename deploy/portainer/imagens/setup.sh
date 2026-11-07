@@ -64,75 +64,203 @@ on conflict (name) do update set value = excluded.value, updated_at = now();
 SQL
 }
 
-# ── O SMTP da tela chega ao serviço de login ────────────────────────────────
+# >>> gotrue — bloco que tests/shell/portainer-setup-smtp.test.sh extrai e roda sozinho
+# ── O que as telas decidem chega ao serviço de login ────────────────────────
 #
-# O GoTrue self-hosted NÃO tem API de configuração: o servidor de e-mail dele
-# mora no env do serviço. O molde da stack apontava para `supabase-mail`, que
-# não existe aqui, então o cadastro por convite morria em "Error sending
-# confirmation email" enquanto a tela Admin → E-mail dizia "Em uso" — ela
-# configura o SMTP do CRM, que é outro caminho (lib/email/roteador.ts). Medido
-# na stack do Portainer em 2026-11-06.
+# O GoTrue self-hosted NÃO tem API de configuração: SMTP e DISABLE_SIGNUP moram
+# no env do processo. Duas formas que NÃO servem, e por quê:
 #
-# A fonte é a MESMA do app, na precedência de lib/email/config.ts: a linha de
-# platform_smtp_settings (a tela). Decifra com fn_decrypt_oauth, cuja chave
-# `semear_chaves` acabou de gravar no banco — por isso esta função roda DEPOIS
-# dela. Sem linha, NÃO mexe: quem configurou direto no env do serviço manda, e
-# sobrescrever com vazio trocaria uma instalação que envia por uma que não
-# envia. Sem nenhum dos dois, avisa — é o mesmo estado que quebra "esqueci a
-# senha".
+#   - o molde apontar para `supabase-mail`: o serviço não existe nesta stack, e
+#     confirmação de cadastro e "esqueci a senha" ficavam mudos enquanto
+#     Admin → E-mail dizia "Em uso" (medido em 2026-11-06);
+#   - `docker service update --env-add`: todo "Update the stack" refaz o `auth`
+#     a partir do arquivo da stack e o env some — e o setup só roda de novo se o
+#     serviço DELE mudou. O e-mail morria em silêncio no redeploy seguinte.
 #
-# `docker service update --env-add` atualiza a chave se ela já existir, e só é
-# chamado quando algo mudou: reiniciar o auth em todo deploy seria efeito
-# colateral de graça.
-sincronizar_smtp_do_gotrue() {
-  local sep=$'\x1f' linha="" host="" porta="587" usuario="" senha="" remetente="" nome=""
-  local atual="" img="${STACK}_auth" falta=0 par
-  local pares=() args=()
-  atual="$(docker service inspect \
-    --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' \
-    "$img" 2>/dev/null || true)"
-  linha="$(psql "$URL" -tA -F "$sep" -c "select coalesce(smtp_host,''), smtp_port,
+# O que vale: o setup escreve GOTRUE_ENV num volume que o `auth` monta só para
+# leitura, e o comando do `auth` (stack.yml) carrega o arquivo antes de subir.
+# O volume sobrevive a redeploy; só muda quando o setup reescreve, e aí o setup
+# reinicia o `auth` — só quando o conteúdo mudou.
+#
+# Fontes, na precedência do app e do kit (hostgator-setup-kit/_common.sh):
+#   e-mail   → platform_smtp_settings (Admin → E-mail; host E remetente); senão
+#              a Resend de platform_config, que também fala SMTP
+#              (smtp.resend.com:465, usuário `resend`, senha = a chave); senão
+#              nada muda — quem pôs SMTP direto no env do `auth` na stack manda.
+#   cadastro → platform_settings.signup_mode: `so_convite` fecha o cadastro
+#              direto (GOTRUE_DISABLE_SIGNUP=true); os outros e "sem linha", aberto.
+# Consulta que FALHA não é "não tem": aquele grupo fica como estava, e o log diz.
+#
+# Stack antiga (colada antes deste arquivo, sem o volume no `auth`): cai no
+# `--env-add` de antes, que vale até o próximo "Update the stack", e avisa.
+GOTRUE_ENV="${GOTRUE_ENV:-/gotrue-env/gotrue.env}"
+SEP=$'\x1f'
+
+# Valor entre aspas simples, seguro para o `.` do sh do `auth`.
+aspas_sh() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# Abre o envelope AES-256-GCM de platform_config (lib/crypto/aes_gcm.ts), com a
+# AI_CRED_AES_KEY do app. Entrada: "cifra iv tag" em hex. Sai 1 se não abrir.
+abrir_envelope() {
+  [ -n "${AI_CRED_AES_KEY:-}" ] && command -v node >/dev/null 2>&1 || return 1
+  node -e "const [c,i,t]=require('fs').readFileSync(0,'utf8').trim().split(' ').map(h=>Buffer.from(h,'hex'));const d=require('crypto').createDecipheriv('aes-256-gcm',Buffer.from(process.env.AI_CRED_AES_KEY,'base64'),i);d.setAuthTag(t);process.stdout.write(Buffer.concat([d.update(c),d.final()]).toString('utf8'))" 2>/dev/null
+}
+
+# A Resend da instalação, como valorDaInstalacao (lib/instalacao/config.ts):
+# a linha manda, inclusive vazia; sem linha, o env. Envelope que não abre vale
+# vazio. Imprime "chave<SEP>remetente"; sai 1 sem os dois, 2 se o banco falhou.
+resend_da_instalacao() {
+  local linhas chave eh valor ct iv tag api="${RESEND_API_KEY:-}" de="${RESEND_FROM_EMAIL:-}"
+  linhas="$(psql "$URL" -tA -F "$SEP" -c "select chave, eh_segredo, coalesce(valor,''),
+      coalesce(encode(ciphertext,'hex'),''), coalesce(encode(iv,'hex'),''), coalesce(encode(tag,'hex'),'')
+    from public.platform_config where chave in ('RESEND_API_KEY','RESEND_FROM_EMAIL')" 2>/dev/null)" || return 2
+  while IFS="$SEP" read -r chave eh valor ct iv tag; do
+    [ -n "$chave" ] || continue
+    if [ "$eh" = t ]; then
+      valor="$(printf '%s %s %s' "$ct" "$iv" "$tag" | abrir_envelope)" || valor=""
+    fi
+    case "$chave" in
+      RESEND_API_KEY) api="$valor" ;;
+      RESEND_FROM_EMAIL) de="$valor" ;;
+    esac
+  done <<<"$linhas"
+  api="$(printf '%s' "$api" | tr -d '[:space:]')"; de="$(printf '%s' "$de" | tr -d '[:space:]')"
+  [ -n "$api" ] && [ -n "$de" ] || return 1
+  printf '%s%s%s' "$api" "$SEP" "$de"
+}
+
+# Grupo e-mail, como pares "CHAVE<SEP>valor" por linha. Sai 1 sem fonte, 2 se
+# não deu para ler (banco, ou valor com quebra de linha, que o env não carrega).
+pares_do_email() {
+  local linha="" host="" porta="" usuario="" senha="" remetente="" nome="" r="" rc=0
+  linha="$(psql "$URL" -tA -F "$SEP" -c "select coalesce(smtp_host,''), smtp_port,
       coalesce(smtp_username,''),
       coalesce(case when smtp_password_encrypted is null then '' else public.fn_decrypt_oauth(smtp_password_encrypted) end,''),
       coalesce(from_email,''), coalesce(from_name,'')
-    from public.platform_smtp_settings where id = 1" 2>/dev/null)" || linha=""
-  if [ -n "$linha" ]; then
-    IFS="$sep" read -r host porta usuario senha remetente nome <<<"$linha"
-  fi
+    from public.platform_smtp_settings where id = 1" 2>/dev/null)" || return 2
+  case "$linha" in *$'\n'*) return 2 ;; esac
+  [ -z "$linha" ] || IFS="$SEP" read -r host porta usuario senha remetente nome <<<"$linha"
   if [ -z "$host" ] || [ -z "$remetente" ]; then
-    if printf '%s\n' "$atual" | grep -qE '^GOTRUE_SMTP_HOST=.+'; then
-      echo "E-mail do login: configurado no próprio serviço; a tela não tem SMTP para impor"
-    else
-      echo "AVISO: sem servidor de e-mail em Admin → E-mail. O login continua sem mandar confirmação de cadastro nem 'esqueci a senha'."
-    fi
+    r="$(resend_da_instalacao)" || { rc=$?; return "$rc"; }
+    IFS="$SEP" read -r senha remetente <<<"$r"
+    host=smtp.resend.com; porta=465; usuario=resend
+  fi
+  printf 'GOTRUE_SMTP_HOST%s%s\n' "$SEP" "$host"
+  printf 'GOTRUE_SMTP_PORT%s%s\n' "$SEP" "${porta:-587}"
+  printf 'GOTRUE_SMTP_USER%s%s\n' "$SEP" "$usuario"
+  printf 'GOTRUE_SMTP_PASS%s%s\n' "$SEP" "$senha"
+  printf 'GOTRUE_SMTP_ADMIN_EMAIL%s%s\n' "$SEP" "$remetente"
+  # Nome em branco não vira env: a marca do produto não é deste arquivo.
+  [ -z "$nome" ] || printf 'GOTRUE_SMTP_SENDER_NAME%s%s\n' "$SEP" "$nome"
+}
+
+# Grupo cadastro. Mesma régua do kit e de disableSignupEsperado
+# (lib/auth/aviso-da-troca-de-modo.ts). Sai 2 se não deu para ler.
+pares_do_cadastro() {
+  local modo v
+  modo="$(psql "$URL" -tA -c "select signup_mode from public.platform_settings where id = 1" 2>/dev/null)" || return 2
+  modo="$(printf '%s' "$modo" | tr -d '[:space:]')"
+  case "$modo" in
+    so_convite) v=true ;;
+    ""|aberto|com_aprovacao) v=false ;;
+    *) return 2 ;;
+  esac
+  printf 'GOTRUE_DISABLE_SIGNUP%s%s\n' "$SEP" "$v"
+}
+
+# Pares → linhas `export CHAVE='valor'` do arquivo.
+como_export() {
+  local k v
+  while IFS="$SEP" read -r k v; do
+    [ -n "$k" ] && printf 'export %s=%s\n' "$k" "$(aspas_sh "$v")"
+  done <<<"$1"
+  return 0
+}
+
+gotrue_por_arquivo() {
+  local img="$1" re="$2" email="$3" rc="$4" cad="$5" antigo="" novo="" tmp
+  antigo="$(cat "$GOTRUE_ENV" 2>/dev/null || true)"
+  novo="$(
+    echo "# Escrito pelo setup da stack (deploy/portainer/imagens/setup.sh). Não edite:"
+    echo "# o próximo setup reescreve a partir de Admin → E-mail e Admin → Cadastro."
+    if [ "$re" = 0 ]; then como_export "$email"; else grep '^export GOTRUE_SMTP_' <<<"$antigo" || true; fi
+    if [ "$rc" = 0 ]; then como_export "$cad"; else grep '^export GOTRUE_DISABLE_SIGNUP=' <<<"$antigo" || true; fi
+  )"
+  # Compara só o que o `auth` carrega: cabeçalho novo numa versão não reinicia.
+  if [ "$(grep -v '^#' <<<"$novo" || true)" = "$(grep -v '^#' <<<"$antigo" || true)" ]; then
+    echo "Serviço de login já estava em dia"
     return 0
   fi
-  pares=(
-    "GOTRUE_SMTP_HOST=$host"
-    "GOTRUE_SMTP_PORT=${porta:-587}"
-    "GOTRUE_SMTP_USER=$usuario"
-    "GOTRUE_SMTP_PASS=$senha"
-    "GOTRUE_SMTP_ADMIN_EMAIL=$remetente"
-  )
-  # Nome do remetente em branco não vira env: quem instalou pode tê-lo posto no
-  # serviço à mão, e a marca do produto não é deste arquivo (é a do banco).
-  [ -z "$nome" ] || pares+=("GOTRUE_SMTP_SENDER_NAME=$nome")
-  for par in "${pares[@]}"; do
-    printf '%s\n' "$atual" | grep -Fqx "$par" || falta=1
-  done
-  if [ "$falta" = 0 ]; then
-    echo "E-mail do login já estava em dia"
-    return 0
-  fi
-  for par in "${pares[@]}"; do args+=(--env-add "$par"); done
-  # --detach: o setup não fica esperando o auth subir; a stack já o reinicia.
-  if docker service update --detach "${args[@]}" "$img" >/dev/null 2>&1; then
-    echo "E-mail do login atualizado a partir de Admin → E-mail"
+  tmp="$GOTRUE_ENV.novo"
+  printf '%s\n' "$novo" > "$tmp"
+  # 0644: o `auth` roda sem root e precisa ler. O volume só existe para ele e
+  # para o setup, como o env de qualquer serviço da stack.
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$GOTRUE_ENV"
+  if docker service update --detach --force "$img" >/dev/null 2>&1; then
+    echo "Serviço de login atualizado a partir de Admin → E-mail e Admin → Cadastro"
   else
-    echo "AVISO: não deu para aplicar o e-mail em $img; confira o serviço no Portainer."
+    echo "AVISO: o arquivo do login foi escrito, mas $img não reiniciou; reinicie-o no Portainer."
   fi
   return 0
 }
+
+# Stack antiga: o `auth` não monta o volume. Vale até o próximo "Update the stack".
+gotrue_por_env() {
+  local img="$1" pares="$2" atual k v falta=0
+  local args=()
+  [ -n "$pares" ] || return 0
+  atual="$(docker service inspect \
+    --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' "$img" 2>/dev/null || true)"
+  while IFS="$SEP" read -r k v; do
+    [ -n "$k" ] || continue
+    grep -Fqx -- "$k=$v" <<<"$atual" || falta=1
+    args+=(--env-add "$k=$v")
+  done <<<"$pares"
+  if [ "$falta" = 0 ]; then
+    echo "Serviço de login já estava em dia"
+    return 0
+  fi
+  if docker service update --detach "${args[@]}" "$img" >/dev/null 2>&1; then
+    echo "Serviço de login atualizado a partir de Admin → E-mail e Admin → Cadastro"
+  else
+    echo "AVISO: não deu para aplicar a configuração em $img; confira o serviço no Portainer."
+  fi
+  return 0
+}
+
+sincronizar_gotrue() {
+  local img="${STACK}_auth" email="" cad="" re=0 rc=0 montagens="" env_atual="" pasta
+  pasta="$(dirname "$GOTRUE_ENV")"
+  email="$(pares_do_email)" || re=$?
+  cad="$(pares_do_cadastro)" || rc=$?
+  montagens="$(docker service inspect \
+    --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{println .Target}}{{end}}' "$img" 2>/dev/null || true)"
+  env_atual="$(docker service inspect \
+    --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' "$img" 2>/dev/null || true)
+$(cat "$GOTRUE_ENV" 2>/dev/null || true)"
+
+  case "$re" in
+    1) if grep -qE '^(export )?GOTRUE_SMTP_HOST=.+' <<<"$env_atual"; then
+         echo "E-mail do login: Admin → E-mail e Resend vazios; fica o que o serviço já tem"
+       else
+         echo "AVISO: sem servidor de e-mail em Admin → E-mail nem Resend. O login continua sem mandar confirmação de cadastro nem 'esqueci a senha'."
+       fi ;;
+    2) echo "AVISO: não deu para ler o e-mail de Admin → E-mail no banco; o do login ficou como estava." ;;
+  esac
+  [ "$rc" = 0 ] || echo "AVISO: não deu para ler o modo de cadastro no banco; o cadastro direto ficou como estava."
+
+  if grep -qxF -- "$pasta" <<<"$montagens" && [ -d "$pasta" ]; then
+    gotrue_por_arquivo "$img" "$re" "$email" "$rc" "$cad"
+  else
+    echo "AVISO: a stack colada no Portainer é anterior ao arquivo do login. Gere a nova (gerar-stack.py) e cole em Stacks › deskcomm › Editor; até lá, o e-mail do login some a cada 'Update the stack'."
+    [ "$re" = 0 ] || email=""
+    [ "$rc" = 0 ] || cad=""
+    gotrue_por_env "$img" "$(printf '%s\n%s' "$email" "$cad")"
+  fi
+  return 0
+}
+# <<< gotrue
 
 criar_dono() {
   echo "Criando o dono ($OWNER_EMAIL)"
@@ -199,7 +327,7 @@ printf '%s\n' "$atual" > "$MARCA"
 semear_chaves
 # Depois de semear: a senha do SMTP é cifrada com a chave que acabou de ir para
 # o banco, e fn_decrypt_oauth não abre o envelope antes disso.
-sincronizar_smtp_do_gotrue
+sincronizar_gotrue
 psql "$URL" -q -c "notify pgrst, 'reload schema'" >/dev/null
 
 [ "$(sql "select count(*) from public.platform_admins where revoked_at is null")" != "0" ] || criar_dono

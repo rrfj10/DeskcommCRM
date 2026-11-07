@@ -27,6 +27,9 @@ x-crm-env: &crm-env
   # que o setup leva de Admin → E-mail (lib/email/estado.ts). Sem esta marca, o
   # aviso "Sem SMTP configurado" e a recusa do "esqueci a senha" não acendem.
   SINGLE_SERVER: "1"
+  # Quem leva as telas ao serviço de login aqui é o setup, não o update.sh do
+  # kit: a tela de cadastro ensina o caminho do Portainer.
+  INSTALACAO_VIA: portainer
   NUVEMSHOP_ENABLED: "false"
   INTERNAL_AGENT_RUN_STUB: "false"
   WAHA_WEBHOOK_REQUIRE_SIGNATURE: "false"
@@ -59,10 +62,14 @@ services:
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       NUVEMSHOP_OAUTH_ENCRYPTION_KEY: ${NUVEMSHOP_OAUTH_ENCRYPTION_KEY}
       CPF_ENCRYPTION_KEY: ${CPF_ENCRYPTION_KEY}
+      # Abre a chave da Resend gravada pela tela, quando ela é o único e-mail.
+      AI_CRED_AES_KEY: ${AI_CRED_AES_KEY}
       OWNER_EMAIL: ${OWNER_EMAIL}
       OWNER_PASSWORD: ${OWNER_PASSWORD}
     volumes:
       - setup-estado:/estado
+      # O arquivo que o serviço de login carrega ao subir (sincronizar_gotrue).
+      - gotrue-env:/gotrue-env
       # Pausa e atualiza os serviços do CRM. Só existe neste serviço.
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [interno]
@@ -120,6 +127,15 @@ services:
 
   auth:
     image: supabase/gotrue:v2.196.0
+    # Carrega o que o setup escreveu a partir das telas (SMTP de Admin → E-mail,
+    # DISABLE_SIGNUP de Admin → Cadastro) e sobe. Arquivo num volume, e não env
+    # no serviço: "Update the stack" refaz o env a partir deste arquivo e
+    # apagaria o que o setup tivesse posto ali. Sem o arquivo, sobe como está.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - if [ -r /gotrue-env/gotrue.env ]; then . /gotrue-env/gotrue.env; fi; if command -v auth >/dev/null 2>&1; then exec auth; fi; exec gotrue
+    volumes:
+      - gotrue-env:/gotrue-env:ro
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: "9999"
@@ -140,10 +156,10 @@ services:
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
       GOTRUE_MAILER_AUTOCONFIRM: "false"
-      # O SMTP do GoTrue NÃO se configura por aqui: quem o preenche é o setup,
-      # a partir de Admin → E-mail (sincronizar_smtp_do_gotrue, em
-      # imagens/setup.sh). Apontar para `supabase-mail` — que não existe nesta
-      # stack — deixava a confirmação de cadastro e o "esqueci a senha" mudos.
+      # O SMTP do GoTrue vem do arquivo acima (sincronizar_gotrue, em
+      # imagens/setup.sh). GOTRUE_SMTP_* posto aqui à mão vale enquanto
+      # Admin → E-mail e a Resend estiverem vazios. Apontar para `supabase-mail`
+      # — que não existe nesta stack — deixava cadastro e "esqueci a senha" mudos.
       GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
@@ -430,6 +446,7 @@ volumes:
   db-config:
   storage-data:
   setup-estado:
+  gotrue-env:
   waha-data:
   waha-media:
 

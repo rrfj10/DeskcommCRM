@@ -70,6 +70,49 @@ exige "cifra de segredos" "$(cifra fn_encrypt_oauth '{"plaintext":"x"}')" 1
 exige "cifra do CPF" "$(cifra encrypt_cpf '{"p_plaintext":"12345678901"}')" 1
 echo "buckets: $($C -H "apikey: $SERVICE_ROLE_KEY" -H "Authorization: Bearer $SERVICE_ROLE_KEY" "$U/storage/v1/bucket" | cut -c1-160)"
 
+passo "login: o que as telas decidem chega ao GoTrue e sobrevive ao redeploy"
+# Grava Admin → E-mail e Admin → Cadastro direto no banco (a senha com aspas e
+# `$`, para provar o arquivo que o sh do auth carrega), chama o setup e lê o env
+# do PROCESSO do GoTrue — não o do serviço, onde o SMTP não mora mais.
+DB="$(docker ps -q -f name=deskcomm_db -f status=running | head -1)"
+docker exec -i -e PGPASSWORD="$POSTGRES_PASSWORD" "$DB" psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -q <<'SQL' >/dev/null
+insert into public.platform_smtp_settings (id, smtp_host, smtp_port, smtp_username, smtp_password_encrypted, from_email, from_name)
+values (1, 'smtp.prova.test', 465, 'prova', public.fn_encrypt_oauth('se''nha $x'), 'login@prova.test', 'Prova')
+on conflict (id) do update set smtp_host = excluded.smtp_host, smtp_port = excluded.smtp_port,
+  smtp_username = excluded.smtp_username, smtp_password_encrypted = excluded.smtp_password_encrypted,
+  from_email = excluded.from_email, from_name = excluded.from_name;
+insert into public.platform_settings (id, signup_mode) values (1, 'so_convite')
+on conflict (id) do update set signup_mode = excluded.signup_mode;
+SQL
+docker service update --detach --force deskcomm_setup >/dev/null
+sleep 15
+esperar_setup "levar as telas ao login"
+env_do_auth() {
+  local c
+  c="$(docker ps -q -f name=deskcomm_auth -f status=running | head -1)"
+  [ -n "$c" ] && docker exec "$c" sh -c 'tr "\0" "\n" < /proc/1/environ' 2>/dev/null
+}
+# Espera o auth reiniciado responder com o modo novo (endpoint público).
+fechado() { $C -H "apikey: $ANON_KEY" "$U/auth/v1/settings" | grep -c '"disable_signup":true'; }
+for i in $(seq 1 24); do [ "$(fechado)" = 1 ] && break; sleep 5; done
+exige "cadastro direto fechado (so_convite)" "$(fechado)" 1
+exige "SMTP da tela no GoTrue" "$(env_do_auth | grep -cx 'GOTRUE_SMTP_HOST=smtp.prova.test')" 1
+exige "senha com aspas e \$ intacta" "$(env_do_auth | grep -cxF "GOTRUE_SMTP_PASS=se'nha \$x")" 1
+exige "SMTP fora do env do serviço" "$(docker service inspect deskcomm_auth \
+  --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' | grep -c '^GOTRUE_SMTP_')" 0
+# O defeito que o arquivo conserta: "Update the stack" que muda o auth o refaz a
+# partir do arquivo da stack, e o setup NÃO roda de novo (o serviço dele não
+# mudou). Uma variável inócua força a recriação do auth.
+sed 's/^      GOTRUE_API_HOST: 0.0.0.0$/&\n      PROVA_REDEPLOY: "1"/' "$S/stack.yml" > "$S/stack-redeploy.yml"
+docker stack deploy --with-registry-auth --detach=true -c "$S/stack-redeploy.yml" deskcomm >/dev/null
+for i in $(seq 1 36); do
+  env_do_auth | grep -qx 'PROVA_REDEPLOY=1' && [ "$(cod -H "apikey: $ANON_KEY" "$U/auth/v1/health")" = 200 ] && break
+  sleep 5
+done
+exige "auth recriado pelo redeploy" "$(env_do_auth | grep -cx 'PROVA_REDEPLOY=1')" 1
+exige "SMTP sobrevive ao redeploy" "$(env_do_auth | grep -cx 'GOTRUE_SMTP_HOST=smtp.prova.test')" 1
+exige "cadastro segue fechado depois do redeploy" "$(fechado)" 1
+
 passo traefik
 docker service inspect deskcomm_app --format '{{json .Spec.Labels}}' | cut -c1-600
 docker service logs --raw --tail 400 traefik_traefik 2>&1 | grep -iE 'deskcomm|resolver|network|error' \

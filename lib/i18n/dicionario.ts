@@ -11195,6 +11195,9 @@ export const DICIONARIO: Traducoes = {
   "Para aplicar agora, rode isto na VPS:": {
     es: "Para aplicar ahora, ejecuta esto en el VPS:",
   },
+  "Para aplicar agora, no Portainer abra Services › deskcomm_setup e clique em Update the service com Force update.": {
+    es: "Para aplicarlo ahora, en Portainer abre Services › deskcomm_setup y haz clic en Update the service con Force update.",
+  },
   "Com o Supabase separado, o cadastro direto não acompanha a troca sozinho: o CRM já segue o modo novo, mas o Supabase continua com o modo anterior. Esta tela só avisa — nada é corrigido aqui.": {
     es: "Con Supabase separado, el registro directo no acompaña el cambio por sí solo: el CRM ya sigue el modo nuevo, pero Supabase sigue con el modo anterior. Esta pantalla solo avisa: aquí no se corrige nada.",
   },

@@ -55,6 +55,9 @@ export default async function Page() {
   // separado, mandar rodar o update.sh seria instrução errada e aviso eterno:
   // ali quem muda é o operador, no painel ou no env do GoTrue próprio.
   const kitSincroniza = process.env.SINGLE_SERVER === "1";
+  // Na stack do Portainer quem leva o modo ao GoTrue é o serviço `setup`
+  // (deploy/portainer/imagens/setup.sh), e não há SSH nem update.sh na VPS.
+  const viaPortainer = process.env.INSTALACAO_VIA === "portainer";
   const alvoDoGoTrue = modo === "so_convite" ? "true" : "false";
 
   return (
@@ -83,12 +86,23 @@ export default async function Page() {
                   usuario.idioma,
                 )}
               </p>
-              <p className="mt-2">
-                {traduzir("Para aplicar agora, rode isto na VPS:", usuario.idioma)}
-              </p>
-              <code className="mt-1 block overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
-                bash hostgator-setup-kit/update.sh
-              </code>
+              {viaPortainer ? (
+                <p className="mt-2">
+                  {traduzir(
+                    "Para aplicar agora, no Portainer abra Services › deskcomm_setup e clique em Update the service com Force update.",
+                    usuario.idioma,
+                  )}
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2">
+                    {traduzir("Para aplicar agora, rode isto na VPS:", usuario.idioma)}
+                  </p>
+                  <code className="mt-1 block overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                    bash hostgator-setup-kit/update.sh
+                  </code>
+                </>
+              )}
             </>
           ) : (
             <>
