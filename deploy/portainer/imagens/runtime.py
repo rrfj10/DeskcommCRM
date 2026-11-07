@@ -18,7 +18,7 @@ OFFICIAL = "https://github.com/melgarafael/DeskcommCRM.git"
 
 
 def command(*args):
-    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=120).stdout.strip()
+    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=45).stdout.strip()
 
 
 class Observer:
@@ -30,6 +30,7 @@ class Observer:
         self.stack, self.repo = stack, f"https://github.com/{owner}/DeskcommCRM"
         self.state = state
         self.proofs = {}
+        self.proof_issues = set()
 
     def docker(self, *args):
         return command("docker", *args)
@@ -44,6 +45,8 @@ class Observer:
     def proof(self, revision, version):
         key = (revision, version)
         if key in self.proofs:
+            if self.proofs[key] is None:
+                raise ValueError("origem não comprovada nesta coleta")
             return self.proofs[key]
         # Tags oficiais e histórico do fork têm origens separadas. Não basta
         # confiar na string APP_VERSION ou nos labels fornecidos pela imagem.
@@ -97,11 +100,13 @@ class Observer:
                 result["base_revision"] = self.proof(revision, version)
                 result["source_verified"] = True
             except (subprocess.SubprocessError, ValueError, OSError):
-                pass
+                self.proofs[(revision, version)] = None
+                self.proof_issues.add("release_refs_unavailable")
         return result
 
     def collect(self):
         self.proofs = {}  # não renova a evidência de origem com um cache antigo
+        self.proof_issues = set()
         issues, services, selected = [], [], {}
         for role in ROLES:
             try:
@@ -120,7 +125,7 @@ class Observer:
             except (subprocess.SubprocessError, OSError):
                 issues.append("collection_failed")
         return dict(schema=1, collected_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), project=self.stack,
-                    services=services, issues=sorted(set(issues)))
+                    services=services, issues=sorted(set(issues) | self.proof_issues))
 
     def token(self):
         app = self.inspect("service", "inspect", self.stack + "_app")
