@@ -65,9 +65,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ steps.ver.outputs.curta }}
-            ${{ github.ref_name == '3f-custom' && format('{0}/{1}/{2}:3f-custom', env.REGISTRY, github.repository_owner, matrix.name) || '' }}
+          # A tag móvel só é promovida depois da prova, em outro job.
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}:sha-${{ steps.ver.outputs.curta }}
           build-args: |
             APP_VERSION=${{ steps.ver.outputs.curta }}
           cache-from: type=gha,scope=3f-custom-${{ matrix.name }}
@@ -93,8 +92,35 @@ jobs:
       - name: Subir a stack e conferir
         run: bash deploy/portainer/prova.sh "sha-${GITHUB_SHA::7}" "$GITHUB_REPOSITORY_OWNER"
 
-  implantar:
+  promover:
     needs: provar
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Promover as imagens aprovadas para 3f-custom
+        env:
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          versao="sha-${GITHUB_SHA::7}"
+          for nome in deskcommcrm deskcomm-worker deskcomm-scheduler deskcomm-db deskcomm-gw deskcomm-setup; do
+            imagem="ghcr.io/$IMAGE_OWNER/$nome"
+            docker buildx imagetools create --prefer-index=false --tag "$imagem:3f-custom" "$imagem:$versao"
+          done
+
+  implantar:
+    needs: promover
     if: github.ref_name == '3f-custom'
     runs-on: ubuntu-latest
     permissions: {}

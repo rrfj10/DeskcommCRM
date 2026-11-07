@@ -1,42 +1,84 @@
 #!/usr/bin/env bash
-# Roda a cada deploy da stack e a cada chamada do webhook deste serviço. Só reaplica
-# o schema quando ele mudou; aí o CRM, o rest e o realtime ficam parados durante a
-# aplicação. Se falhar, o CRM segue na versão que estava.
+# Roda a cada deploy/webhook. Conflitos do Swarm têm retry limitado e "Pronto"
+# só aparece depois da convergência dos serviços. Não faz rollback de schema.
 set -euo pipefail
-
-: "${STACK:?}" "${IMAGE_OWNER:?}" "${DESKCOMM_VERSION:?}" "${POSTGRES_PASSWORD:?}"
-: "${SERVICE_ROLE_KEY:?}" "${OWNER_EMAIL:?}" "${OWNER_PASSWORD:?}"
-: "${NUVEMSHOP_OAUTH_ENCRYPTION_KEY:?}" "${CPF_ENCRYPTION_KEY:?}"
-URL="postgresql://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres"
-BASELINE=/schema/baseline.sql
-MARCA=/estado/baseline.sha256
-# Os mesmos filtros de hostgator-setup-kit/_common.sh (reaplicar_baseline).
-ERROS_BENIGNOS='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
-ERROS_DE_DISPUTA='deadlock detected|could not serialize access|lock timeout|could not obtain lock|terminating connection|server closed the connection|connection to server was lost|SSL connection has been closed unexpectedly|SSL SYSCALL error|remaining connection slots|too many clients|max client(s| connections) reached|the database system is (starting up|shutting down|in recovery mode|not yet accepting connections)|Temporary failure in name resolution|Connection refused|Connection timed out|timeout expired|Network (is )?unreachable'
-# Quem fala com o banco: com eles de pé, a troca das regras de isolamento trava.
-QUEM_PAUSA="${STACK}_app ${STACK}_worker ${STACK}_scheduler ${STACK}_rest ${STACK}_realtime"
-PAUSADOS=""
 
 die() { printf 'ERRO: %s\n' "$*" >&2; exit 1; }
 sql() { PGCONNECT_TIMEOUT=5 psql "$URL" -tAc "$1" | tr -d '[:space:]'; }
 
+# Só repetimos a disputa de versão do Swarm. Erros de autenticação, imagem
+# ausente ou daemon indisponível não viram sucesso nem entram em laço infinito.
+swarm_com_retry() {
+  local tentativa saida rc
+  for tentativa in 1 2 3 4 5; do
+    rc=0
+    saida="$(docker service "$@" 2>&1)" || rc=$?
+    if [ "$rc" = 0 ]; then
+      [ -z "$saida" ] || printf '%s\n' "$saida"
+      return 0
+    fi
+    if [ "$tentativa" = 5 ] || ! grep -qi 'update out of sequence' <<<"$saida"; then
+      printf '%s\n' "$saida" >&2
+      return "$rc"
+    fi
+    echo "Swarm ocupado; repetindo a operação ($tentativa/5)" >&2
+    sleep "$tentativa"
+  done
+}
+
+aguardar_replicas() {
+  local servico="$1" desejadas="$2" i estado replicas linhas
+  for i in $(seq 1 60); do
+    estado="$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}' "$servico")" || return 1
+    if [ "$desejadas" != 0 ]; then
+      case "$estado" in
+        paused|rollback_*) echo "ERRO: $servico terminou em $estado" >&2; return 1 ;;
+      esac
+    fi
+    linhas="$(docker service ls --filter "name=$servico" --format '{{.Name}} {{.Replicas}}')" || return 1
+    replicas="$(awk -v s="$servico" '$1 == s {print $2}' <<<"$linhas")"
+    if [ "$replicas" = "$desejadas/$desejadas" ] && [ "$estado" != updating ]; then
+      return 0
+    fi
+    sleep 5
+  done
+  echo "ERRO: $servico não convergiu para $desejadas/$desejadas" >&2
+  return 1
+}
+
 retomar() {
-  local s
-  for s in $PAUSADOS; do
-    docker service scale --detach "$s=1" >/dev/null || echo "AVISO: suba $s pelo Portainer" >&2
+  local par s replicas pendentes="" falhou=0
+  for par in $PAUSADOS; do
+    s="${par%:*}"; replicas="${par##*:}"
+    if swarm_com_retry scale --detach "$s=$replicas" >/dev/null && aguardar_replicas "$s" "$replicas"; then
+      :
+    else
+      echo "ERRO: não foi possível restaurar $s para $replicas réplicas; confira o serviço no Portainer" >&2
+      pendentes="$pendentes $par"
+      falhou=1
+    fi
   done
-  PAUSADOS=""
+  PAUSADOS="$pendentes"
+  return "$falhou"
 }
+
 pausar() {
-  local s
+  local s replicas
   for s in $QUEM_PAUSA; do
-    docker service inspect "$s" >/dev/null 2>&1 || continue
-    PAUSADOS="$PAUSADOS $s"
-    docker service scale "$s=0" >/dev/null
+    replicas="$(docker service inspect --format '{{.Spec.Mode.Replicated.Replicas}}' "$s")" || return 1
+    case "$replicas" in ''|*[!0-9]*) echo "ERRO: réplicas inválidas para $s" >&2; return 1 ;; esac
+    PAUSADOS="$PAUSADOS $s:$replicas"
+    swarm_com_retry scale --detach "$s=0" >/dev/null || return 1
+    aguardar_replicas "$s" 0 || return 1
   done
 }
-trap retomar EXIT
-trap 'exit 130' INT TERM
+
+finalizar() {
+  local rc=$?
+  trap - EXIT
+  if ! retomar; then rc=1; fi
+  exit "$rc"
+}
 
 # Sem ON_ERROR_STOP: ele pararia no primeiro "já existe" e pularia o apêndice,
 # onde estão as migrations novas. Sem ele, quem acusa falha é o filtro de erros.
@@ -102,40 +144,67 @@ end $$;
 SQL
 }
 
-echo "Esperando o banco e o Storage"
-for i in $(seq 1 120); do
-  n="$(sql "select count(*) from information_schema.tables where table_schema='storage' and table_name in ('buckets','objects')" 2>/dev/null || true)"
-  [ "$n" = "2" ] && break
-  [ "$i" = 120 ] && die "o banco ou o Storage não ficaram prontos"
-  sleep 5
-done
+atualizar_servicos() {
+  local par s replicas
+  echo "Atualizando os serviços para $DESKCOMM_VERSION"
+  for par in app:deskcommcrm worker:deskcomm-worker scheduler:deskcomm-scheduler; do
+    s="${STACK}_${par%%:*}"
+    docker service inspect "$s" >/dev/null 2>&1 || die "serviço obrigatório ausente: $s"
+    swarm_com_retry update --detach --image "ghcr.io/${IMAGE_OWNER}/${par##*:}:${DESKCOMM_VERSION}" "$s" >/dev/null || die "a atualização de $s falhou"
+    replicas="$(docker service inspect --format '{{.Spec.Mode.Replicated.Replicas}}' "$s")"
+    aguardar_replicas "$s" "$replicas" || die "a atualização de $s não ficou pronta"
+  done
+  echo "Pronto."
+}
 
-atual="$(sha256sum "$BASELINE" | cut -d' ' -f1)"
-existe="$(sql "select 1 from information_schema.tables where table_schema='public' and table_name='organizations'")"
-psql "$URL" -v ON_ERROR_STOP=1 -q -c \
-  "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" >/dev/null
+main() {
+  : "${STACK:?}" "${IMAGE_OWNER:?}" "${DESKCOMM_VERSION:?}" "${POSTGRES_PASSWORD:?}"
+  : "${SERVICE_ROLE_KEY:?}" "${OWNER_EMAIL:?}" "${OWNER_PASSWORD:?}"
+  : "${NUVEMSHOP_OAUTH_ENCRYPTION_KEY:?}" "${CPF_ENCRYPTION_KEY:?}"
+  URL="postgresql://postgres:${POSTGRES_PASSWORD}@supabase-db:5432/postgres"
+  BASELINE=/schema/baseline.sql
+  MARCA=/estado/baseline.sha256
+  # Os mesmos filtros de hostgator-setup-kit/_common.sh (reaplicar_baseline).
+  ERROS_BENIGNOS='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
+  ERROS_DE_DISPUTA='deadlock detected|could not serialize access|lock timeout|could not obtain lock|terminating connection|server closed the connection|connection to server was lost|SSL connection has been closed unexpectedly|SSL SYSCALL error|remaining connection slots|too many clients|max client(s| connections) reached|the database system is (starting up|shutting down|in recovery mode|not yet accepting connections)|Temporary failure in name resolution|Connection refused|Connection timed out|timeout expired|Network (is )?unreachable'
+  # Quem fala com o banco: com eles de pé, a troca das regras de isolamento trava.
+  QUEM_PAUSA="${STACK}_app ${STACK}_worker ${STACK}_scheduler ${STACK}_rest ${STACK}_realtime"
+  PAUSADOS=""
 
-if [ "$existe" != "1" ]; then
-  echo "Banco novo: aplicando o schema"
-  psql "$URL" -v ON_ERROR_STOP=1 -q -f "$BASELINE" >/dev/null || die "o schema falhou"
-elif [ "${FORCAR_SCHEMA:-}" = "1" ] || [ "$(cat "$MARCA" 2>/dev/null || true)" != "$atual" ]; then
-  echo "Schema mudou: pausando o CRM durante a aplicação"
-  pausar
-  reaplicar || die "o schema não fechou; o CRM segue na versão anterior"
-else
-  echo "Schema sem mudança"
-fi
-printf '%s\n' "$atual" > "$MARCA"
-semear_chaves
-psql "$URL" -q -c "notify pgrst, 'reload schema'" >/dev/null
+  trap finalizar EXIT
+  trap 'exit 130' INT TERM
 
-[ "$(sql "select count(*) from public.platform_admins where revoked_at is null")" != "0" ] || criar_dono
-retomar
+  echo "Esperando o banco e o Storage"
+  for i in $(seq 1 120); do
+    n="$(sql "select count(*) from information_schema.tables where table_schema='storage' and table_name in ('buckets','objects')" 2>/dev/null || true)"
+    [ "$n" = "2" ] && break
+    [ "$i" = 120 ] && die "o banco ou o Storage não ficaram prontos"
+    sleep 5
+  done
 
-echo "Atualizando os serviços para $DESKCOMM_VERSION"
-for par in app:deskcommcrm worker:deskcomm-worker scheduler:deskcomm-scheduler; do
-  s="${STACK}_${par%%:*}"
-  docker service inspect "$s" >/dev/null 2>&1 || continue
-  docker service update --detach --image "ghcr.io/${IMAGE_OWNER}/${par##*:}:${DESKCOMM_VERSION}" "$s" >/dev/null
-done
-echo "Pronto."
+  atual="$(sha256sum "$BASELINE" | cut -d' ' -f1)"
+  existe="$(sql "select 1 from information_schema.tables where table_schema='public' and table_name='organizations'")"
+  psql "$URL" -v ON_ERROR_STOP=1 -q -c \
+    "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" >/dev/null
+
+  if [ "$existe" != "1" ]; then
+    echo "Banco novo: aplicando o schema"
+    psql "$URL" -v ON_ERROR_STOP=1 -q -f "$BASELINE" >/dev/null || die "o schema falhou"
+  elif [ "${FORCAR_SCHEMA:-}" = "1" ] || [ "$(cat "$MARCA" 2>/dev/null || true)" != "$atual" ]; then
+    echo "Schema mudou: pausando o CRM durante a aplicação"
+    pausar || die "não foi possível pausar os serviços antes do schema"
+    reaplicar || die "o schema não fechou; confira os logs antes de tentar novamente"
+  else
+    echo "Schema sem mudança"
+  fi
+  printf '%s\n' "$atual" > "$MARCA"
+  semear_chaves
+  psql "$URL" -q -c "notify pgrst, 'reload schema'" >/dev/null
+
+  [ "$(sql "select count(*) from public.platform_admins where revoked_at is null")" != "0" ] || criar_dono
+  retomar || die "a retomada dos serviços falhou"
+
+  atualizar_servicos
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

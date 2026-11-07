@@ -76,6 +76,10 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Sobe a stack num Swarm descartável antes de a VPS receber a versão. Sem ele, " +
       "imagem quebrada chega à VPS do fork.",
   },
+  "imagens-3f-custom.yml::promover": {
+    condicao: null,
+    efeito: "Move a tag consumida pela VPS só depois de a stack passar na prova; publicar antes expõe builds não aprovados.",
+  },
   "imagens-3f-custom.yml::implantar": {
     condicao: "github.ref_name == '3f-custom'",
     efeito:
