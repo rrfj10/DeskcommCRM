@@ -18,6 +18,9 @@ describe("pr-mexe-na-imagem", () => {
     ["Dockerfile"],
     ["Dockerfile.worker"],
     ["Dockerfile.scheduler"],
+    ["deploy/portainer/stack.yml"],
+    ["deploy/portainer/imagens/setup.sh"],
+    ["deploy/portainer/privado-outro/stack.yml"],
     [".dockerignore"],
     ["package.json"],
     ["pnpm-lock.yaml"],
@@ -34,6 +37,16 @@ describe("pr-mexe-na-imagem", () => {
     [".github/algum/script.ts"],
   ])("%s → constrói", (caminho) => {
     expect(responde(["docs/leia.md", caminho])).toBe("sim");
+  });
+
+  it.each([
+    "deploy/portainer/privado",
+    "deploy/portainer/privado/",
+    "deploy/portainer/privado/chaves.env",
+    "deploy/portainer/privado/stack.yml",
+    "deploy/portainer/privado/subpasta/arquivo.yml",
+  ])("%s → fora do contexto de build", (caminho) => {
+    expect(responde([caminho])).toBe("nao");
   });
 
   it("entrada vazia constrói — não saber o que mudou nunca vira 'pula'", () => {
