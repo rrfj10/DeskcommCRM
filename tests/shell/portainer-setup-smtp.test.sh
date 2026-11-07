@@ -173,7 +173,8 @@ check "senha com aspas, espaço e \$ volta idêntica" test "$(lido aplica GOTRUE
 check "remetente lido pelo sh" test "$(lido aplica GOTRUE_SMTP_ADMIN_EMAIL)" = naoresponda@exemplo.test
 check "nome com espaço lido pelo sh" test "$(lido aplica GOTRUE_SMTP_SENDER_NAME)" = "Direct Line"
 check "cadastro aberto → DISABLE_SIGNUP=false" test "$(lido aplica GOTRUE_DISABLE_SIGNUP)" = false
-check "arquivo legível pelo auth (0644)" bash -c '[ "$(stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1")" = 644 ]' _ "$TMP/aplica/vol/gotrue.env"
+# GNU primeiro: no Linux `stat -f` é o modo do SISTEMA DE ARQUIVOS e sai 0.
+check "arquivo legível pelo auth (0644)" bash -c '[ "$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1")" = 644 ]' _ "$TMP/aplica/vol/gotrue.env"
 nao_contem "se'nha" "$SAIDA" "não imprime a senha do SMTP"
 contem "atualizado" "$SAIDA" "diz o que fez"
 
