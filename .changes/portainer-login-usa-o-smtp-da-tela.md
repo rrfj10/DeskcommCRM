@@ -1,5 +1,5 @@
 ---
-impacto: nada_mudou
+impacto: exige_acao
 secao: corrigido
 titulo: Instalação pelo Portainer volta a mandar a confirmação de cadastro e o "esqueci a senha"
 ---
@@ -12,17 +12,20 @@ convite da equipe saía, mas quem era convidado via "o envio de e-mails desta
 instalação não está configurado" ao criar a conta, e o "esqueci a senha" nunca
 chegava.
 
-Agora o `setup` copia o SMTP de **Admin › E-mail** para o serviço de login a
-cada execução, decifrando a senha no banco, e o molde da stack deixou de trazer
-os valores falsos. Quem já tem o SMTP preenchido naquela tela não precisa fazer
-nada além da atualização de sempre: o próximo `setup` leva a configuração e o
-login volta a enviar. Quem só usa o serviço externo de envio precisa preencher
-também o servidor SMTP na mesma tela — é ele que o login usa.
+Agora o `setup` leva ao serviço de login, a cada execução, o SMTP de
+**Admin › E-mail** (ou a Resend da mesma tela, que também fala SMTP) e o modo de
+**Admin › Cadastro** — em "só convite", o cadastro direto passa a ficar fechado
+também no login. A configuração mora num arquivo num volume que o serviço de
+login carrega ao subir, então *Update the stack* não a apaga.
 
-Duas coisas para saber: trocar o SMTP de **Admin › E-mail** passa a valer para o
-login na próxima execução do `setup` (webhook da atualização ou *Update the
-stack*), não na hora; e quem configurou o SMTP direto no env do serviço de login
-continua mandando, porque sem SMTP na tela o `setup` não mexe em nada.
+Trocar o e-mail ou o modo de cadastro nas telas passa a valer para o login na
+próxima execução do `setup` (webhook da atualização, ou *Force update* no serviço
+`deskcomm_setup`), não na hora. A tela de cadastro, no Portainer, ensina esse
+caminho em vez do `update.sh` do kit.
 
-A instalação por Docker Compose com o kit já se comportava assim — o que faltava
-era a peça equivalente no caminho do Portainer.
+## Requer atenção
+
+Quem instalou pela stack do Portainer: gere a stack de novo com `gerar-stack.py`
+(as chaves são reaproveitadas) e cole em Stacks › deskcomm › Editor, com
+**Update the stack**, uma vez. Sem isso o `setup` segue pelo caminho antigo, que se perde
+no próximo *Update the stack*, e o log dele pede a troca.

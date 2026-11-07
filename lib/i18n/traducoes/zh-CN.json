@@ -5705,6 +5705,7 @@
   "A troca de modo ainda não chegou ao servidor.": "模式更改尚未到达服务器。",
   "A troca só vale para o cadastro direto depois da próxima atualização do servidor: o CRM já segue o modo novo, mas o GoTrue da VPS continua com o modo anterior. Esta tela só avisa — nada é corrigido aqui.": "此次更改要到服务器下次更新后才对直接注册生效：CRM 已按新模式运行，但 VPS 上的 GoTrue 仍是原来的模式。本页面只提醒，不做任何修正。",
   "Para aplicar agora, rode isto na VPS:": "要立即在 VPS 上生效，请运行：",
+  "Para aplicar agora, no Portainer abra Services, escolha o serviço setup desta stack e clique em Update the service com Force update.": "要立即生效，请在 Portainer 中打开 Services，选择本 stack 的 setup 服务，勾选 Force update 后点击 Update the service。",
   "Com o Supabase separado, o cadastro direto não acompanha a troca sozinho: o CRM já segue o modo novo, mas o Supabase continua com o modo anterior. Esta tela só avisa — nada é corrigido aqui.": "使用独立的 Supabase 时，直接注册不会自动跟随此次更改：CRM 已按新模式运行，但 Supabase 仍是原来的模式。本页面只提醒，不做任何修正。",
   "No painel do Supabase, em Authentication → Sign In / Up, desligue \"Allow new users to sign up\".": "在 Supabase 控制台的 Authentication → Sign In / Up 中，关闭 \"Allow new users to sign up\"。",
   "No painel do Supabase, em Authentication → Sign In / Up, ligue \"Allow new users to sign up\".": "在 Supabase 控制台的 Authentication → Sign In / Up 中，开启 \"Allow new users to sign up\"。",

@@ -124,6 +124,11 @@ GH
 chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH"
 unset FAKE_GH_PRS FAKE_GH_PRS_FECHADOS FAKE_GH_PAI FAKE_GH_SEM_NUMERO
+# O gate lê o número do PR do CI em GITHUB_REF (refs/pull/N/merge) e deixa esse
+# PR de fora. Rodando DENTRO do CI de um PR, o número de verdade vazava para os
+# cenários: no PR #7 do fork, o #7 falso desta suíte sumia e 9 casos reprovavam.
+# A suíte monta os próprios PRs; o do CI não é nenhum deles.
+unset GITHUB_REF
 
 # ── um "repositório principal" mínimo, com duas migrations já aplicadas ──────────────
 principal="$TMP/principal"; mkdir -p "$principal/supabase/migrations"
