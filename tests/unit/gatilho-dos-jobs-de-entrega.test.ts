@@ -64,8 +64,12 @@ const DIR = join(process.cwd(), ".github/workflows");
  * que desliga um job de entrega fica visível em code review.
  */
 const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string }> = {
-  "imagens-3f-custom.yml::publicar": {
+  "imagens-3f-custom.yml::identidade": {
     condicao: null,
+    efeito: "Resolve a release ancestral comprovada antes do build para identificar a instalação personalizada.",
+  },
+  "imagens-3f-custom.yml::publicar": {
+    condicao: "github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
     efeito:
       "Publica as imagens do fork a cada push na 3f-custom. Sem ele, a VPS do fork " +
       "para de receber as personalizações.",
@@ -75,6 +79,10 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
     efeito:
       "Sobe a stack num Swarm descartável antes de a VPS receber a versão. Sem ele, " +
       "imagem quebrada chega à VPS do fork.",
+  },
+  "imagens-3f-custom.yml::promover": {
+    condicao: "github.event_name == 'push' && github.ref_name == '3f-custom'",
+    efeito: "Move a tag consumida pela VPS só depois de a stack passar na prova; publicar antes expõe builds não aprovados.",
   },
   "imagens-3f-custom.yml::implantar": {
     condicao: "github.ref_name == '3f-custom'",

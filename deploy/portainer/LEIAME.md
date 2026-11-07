@@ -39,10 +39,77 @@ Uma vez só:
    copie a URL. Quem tem a URL dispara o serviço: não a publique.
 2. Grave no GitHub: `gh secret set PORTAINER_WEBHOOK_SETUP --repo rrfj10/DeskcommCRM`.
 
-A partir daí, cada merge na `3f-custom` publica as imagens, prova a stack num Swarm
-descartável e chama o `setup`. Ele aplica o schema, se mudou, e atualiza o CRM. Com
-schema novo, o CRM fica fora do ar durante a aplicação. Se o `setup` falhar, o CRM
-segue na versão anterior, e o log dele fica em **Services › deskcomm_setup**.
+A partir daí, cada merge na `3f-custom` publica imagens com tag por SHA, prova essa
+versão num Swarm descartável, promove as imagens aprovadas para `3f-custom` e chama
+o `setup`. Se a prova falhar, a tag móvel permanece na versão anterior. A promoção
+das seis tags é sequencial: não é uma transação entre pacotes.
+
+O setup aplica o schema quando necessário, preserva a quantidade anterior de
+réplicas ao retomar e aguarda a convergência dos serviços. Conflitos transitórios
+`update out of sequence` têm até cinco tentativas; rollback, pausa ou timeout
+interrompem a execução sem imprimir “Pronto.”.
+
+Com schema novo, o CRM fica fora do ar durante a aplicação. Uma falha não desfaz
+SQL já aplicado nem garante retorno à imagem anterior: o Portainer também pode
+ter atualizado serviços. Confira as tarefas e os logs em **Services › deskcomm_setup**.
+O rollback configurado no serviço app é diferente de rollback de banco.
+
+## Versão confirmada no rodapé
+
+O serviço `deskcomm_runtime` observa app, worker e scheduler a cada cinco minutos
+e envia um heartbeat autenticado pela rede interna. Usa os IDs reais dos
+containers/imagens, os healthchecks, a revisão OCI e uma release oficial
+comprovadamente ancestral do código do fork. A versão base aparece com a marca
+“Personalizada” quando a revisão do fork difere da release.
+
+O build resolve essa base pelas tags oficiais e pelo histórico Git, não pelo
+`package.json` (que mantém uma versão de desenvolvimento) nem pela tag móvel
+`3f-custom`. Se o build não comprovar uma release ancestral, a publicação falha.
+A prova da stack no CI exige uma observação completa gravada antes de promover
+as imagens para produção. PRs deste fork podem publicar/provar imagens por SHA;
+essas candidatas não movem a tag de produção nem chamam o webhook.
+
+Quem já colou a stack antiga recebe o observador pelo setup atualizado, sem
+copiar novamente chaves. Nesse caso o serviço aparece em **Services** como
+`deskcomm_runtime`, gerenciado pelo setup; a stack nova também o declara no molde.
+O serviço criado para a stack antiga usa um label próprio, para que um prune do
+editor legado não o apague. O socket do Docker fica no setup/observador, nunca no
+app. Como o setup, o observador tem autoridade do daemon; o mount `ro` não é uma
+restrição de operações da API do Docker. As credenciais de heartbeat são lidas
+da configuração do serviço app e não são copiadas para logs ou para o payload.
+
+Sem três serviços saudáveis, com revisões divergentes ou sem comprovação da
+origem, o aviso continua. Após quinze minutos sem observação válida, a confirmação
+vence. O processo reporta falhas nos logs de `deskcomm_runtime`; se não conseguir
+entregar os heartbeats, seu healthcheck também falha. Esta integração observa;
+não executa pedidos de atualização vindos do CRM nem anuncia versão nova do fork.
+A coleta é local ao manager, para a VPS de nó único deste kit. Um Swarm com
+containers distribuídos entre vários nós exige coleta remota autenticada e não
+é certificado por este observador.
+
+## Diagnosticar erro na atualização
+
+O setup é uma tarefa finita: `0/1` após `Complete` com código 0 é esperado. Não
+altere réplicas para mantê-lo em execução. O resultado da stack não se deduz apenas
+do número de réplicas ou de logs de várias execuções misturados.
+
+No Portainer, expanda as tarefas do serviço e confira a execução mais recente,
+seu código de saída e o campo Error. Confira também app, worker e scheduler. Uma
+tarefa antiga Failed pode continuar no histórico mesmo com uma substituta Running.
+Os logs da aplicação são diferentes dos logs da tarefa de setup.
+
+Há um [bug reportado no Portainer 2.45](https://github.com/portainer/portainer/issues/13281)
+no qual uma tarefa histórica marca a atualização da stack como erro e o editor pode
+voltar ao arquivo anterior embora o Swarm tenha aplicado a atualização. A versão
+2.45.3 LTS observada no incidente requer essa checagem. O rótulo de uma release na
+issue não prova que a correção já foi publicada: confira as notas oficiais antes
+de planejar atualização do Portainer.
+
+Se a mensagem for `update out of sequence`, não dispare outra atualização enquanto
+setup ou serviços estiverem mudando. A repetição limitada do setup não serializa
+uma operação externa do Portainer. Antes de repetir, compare a imagem/digest e as
+configurações efetivas com o editor salvo. Não remova a stack nem os volumes para
+limpar um alerta. Um “Pronto.” do setup não substitui testar o acesso ao CRM.
 
 ## Voltar uma versão
 

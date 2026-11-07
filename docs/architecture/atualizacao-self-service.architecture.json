@@ -25,7 +25,15 @@
       "label": "O que o dono vê"
     }
   ],
-  "mainPath": ["agentsh", "agentroute", "systemversion", "footer", "painel", "updateroute", "runs"],
+  "mainPath": [
+    "agentsh",
+    "agentroute",
+    "systemversion",
+    "footer",
+    "painel",
+    "updateroute",
+    "runs"
+  ],
   "nodes": [
     {
       "id": "agentsh",
@@ -98,6 +106,22 @@
       "type": "frontend",
       "label": "/app/settings/atualizacao",
       "sublabel": "retrato antigo informa a última conferência · avisos antes do botão"
+    },
+    {
+      "id": "swarmmetadata",
+      "lane": "host",
+      "col": 2,
+      "type": "database",
+      "label": "Docker Swarm / imagens",
+      "sublabel": "serviço, container, healthcheck, revision e APP_VERSION"
+    },
+    {
+      "id": "swarmobserver",
+      "lane": "host",
+      "col": 3,
+      "type": "service",
+      "label": "deskcomm_runtime (Portainer)",
+      "sublabel": "observação a cada 5 min · procedência Git · não executa updates"
     }
   ],
   "edges": [
@@ -174,6 +198,18 @@
       "from": "runs",
       "to": "painel",
       "label": "polling 5s — progresso e desfecho"
+    },
+    {
+      "id": "swarm1",
+      "from": "swarmmetadata",
+      "to": "swarmobserver",
+      "label": "inspeciona containers em execução e verifica ancestralidade da release"
+    },
+    {
+      "id": "swarm2",
+      "from": "swarmobserver",
+      "to": "agentroute",
+      "label": "heartbeat autenticado; capacidade de forçar update=false"
     }
   ],
   "cards": [
